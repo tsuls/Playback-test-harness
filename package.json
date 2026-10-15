@@ -1,0 +1,33 @@
+{
+  "name": "playback-test-harness",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Automated video playback tests in TypeScript with Playwright and Shaka Player: time to first frame, rebuffering, errors, flake detection, and CI on every push.",
+  "license": "MIT",
+  "author": "Tyler Sulsenti",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tsuls/Playback-test-harness.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tsuls/Playback-test-harness/issues"
+  },
+  "homepage": "https://github.com/tsuls/Playback-test-harness#readme",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "tsc && playwright test",
+    "test:unit": "playwright test --project=unit",
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "shaka-player": "^5.2.13"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
+  },
+  "keywords": []
+}

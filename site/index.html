@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Playback test page</title>
+  <style>video { width: 640px; max-width: 100%; background: #000; }</style>
+  <script src="/shaka/shaka-player.compiled.js"></script>
+</head>
+<body>
+  <!-- `muted` + `autoplay`: browsers always allow muted autoplay, so playback
+       starts without a click, both under Playwright and when opened by hand. -->
+  <video id="video" muted autoplay playsinline></video>
+
+  <script>
+    // Usage: /?src=<manifest URL>[&abr=off]
+    //   abr=off  disables adaptive bitrate and pins the highest-bandwidth variant.
+    //
+    // Every event is pushed into window.__events as
+    //   { type, source, t, detail? }
+    // where `t` is performance.now() in milliseconds. The shape matches
+    // PlaybackEvent in src/types.ts; the test reads this array afterwards.
+    window.__events = [];
+    const record = (type, source, detail) =>
+      window.__events.push({ type, source, t: performance.now(), detail });
+
+    const params = new URLSearchParams(location.search);
+    const src = params.get('src');
+    const abrOff = params.get('abr') === 'off';
+    const video = document.getElementById('video');
+
+    // Media element events.
+    for (const type of ['loadstart', 'playing', 'waiting']) {
+      video.addEventListener(type, () => record(type, 'video'));
+    }
+    video.addEventListener('error', () =>
+      record('error', 'video', { code: video.error?.code, message: video.error?.message }));
+
+    // requestVideoFrameCallback runs once per frame the browser actually
+    // presents. We only need the first one. `presentationTime` is when that
+    // frame was handed to the compositor, on the same clock as performance.now().
+    video.requestVideoFrameCallback((_now, meta) => {
+      window.__events.push({ type: 'first-frame', source: 'video', t: meta.presentationTime });
+    });
+
+    async function main() {
+      if (!src) throw new Error('missing ?src= query parameter');
+
+      shaka.polyfill.installAll();
+      if (!shaka.Player.isBrowserSupported()) throw new Error('Shaka: browser not supported');
+
+      const player = new shaka.Player();
+      window.__player = player; // so the test can call player.getStats()
+      await player.attach(video);
+
+      const activeVariant = () => player.getVariantTracks().find((t) => t.active);
+
+      player.addEventListener('error', (e) => record('error', 'shaka', {
+        code: e.detail.code, category: e.detail.category, severity: e.detail.severity,
+      }));
+      player.addEventListener('buffering', (e) => record('buffering', 'shaka', { buffering: e.buffering }));
+      player.addEventListener('adaptation', () => {
+        const v = activeVariant();
+        record('adaptation', 'shaka', v && { height: v.height, bandwidth: v.bandwidth, videoCodec: v.videoCodec });
+      });
+
+      if (abrOff) player.configure('abr.enabled', false);
+
+      // TTFF is measured from this mark, i.e. from the moment we ask Shaka to load.
+      record('load-start', 'page');
+      await player.load(src);
+
+      if (abrOff) {
+        const highest = player.getVariantTracks().sort((a, b) => b.bandwidth - a.bandwidth)[0];
+        player.selectVariantTrack(highest, /* clearBuffer */ true);
+      }
+    }
+
+    main().catch((err) => {
+      // Shaka rejects with a shaka.util.Error that has a numeric `code`.
+      record('error', 'page', { code: err.code, message: String(err.message ?? err) });
+    });
+  </script>
+</body>
+</html>
