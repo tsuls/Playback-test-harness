@@ -17,9 +17,10 @@ Owner: Tyler. He will present this in a technical interview on Oct 22, so he has
 ## Stack
 
 - Node 20+, TypeScript with `strict: true`
-- Playwright Test (Chromium)
+- Playwright Test (Chromium; Microsoft Edge from Phase 5)
 - Shaka Player from npm, served from a local static page
-- GitHub Actions
+- GitHub Actions, plus a self-hosted Jenkins (Phase 4)
+- `tsx` to run the TypeScript report scripts (no build step)
 - Unit tests for pure functions: Playwright's test runner is fine, no need for a second framework
 
 ## What it does
@@ -58,7 +59,10 @@ tests/network.spec.ts      throttled stall and recovery
 tests/chaos.spec.ts        demo flaky test (CHAOS=1)
 tests/unit/*.spec.ts       unit tests for metrics.ts and flake.ts
 scripts/flake-report.ts    JSON report to flake table
+scripts/metrics-report.ts  JSON report to results/metrics.json + summary table
+src/report.ts              shared reader for Playwright's JSON report
 .github/workflows/ci.yml
+Jenkinsfile
 playwright.config.ts
 README.md
 ```
@@ -70,6 +74,22 @@ README.md
 **Phase 2: Quality metrics and flakes.** Rebuffer and error metrics, the `getStats()` cross-check, the throttled stall test, the ClearKey test, the chaos test, the JSON reporter, the flake report script and `results/metrics.json`.
 
 **Phase 3: CI and README.** GitHub Actions on push and pull request: checkout, setup-node with npm cache, `npm ci`, install the browser with dependencies, run the suite with `--repeat-each=3`, upload the HTML report and `results/` as artifacts, and write the summary table to `$GITHUB_STEP_SUMMARY`. Write the workflow file but don't push. README sections: what it measures and how, how flakes are detected, a sample results table, known constraints (DRM, codecs, network variance), and what to add next (a device matrix, real TVs, regression alerts against a baseline).
+
+**Phase 4: Jenkins (done).** A `Jenkinsfile` that mirrors `ci.yml`: a declarative pipeline running inside Microsoft's Playwright Docker image (tag matches the installed `@playwright/test`), `npm ci` → `tsc` → tests with `--repeat-each=3`, then a `post { always }` block that runs each report script separately, publishes `results/junit.xml` (Playwright's built-in JUnit reporter) and archives artifacts. A Multibranch Pipeline job builds every branch and PR from the origin repo (fork PRs are deliberately not built), triggered by a signed GitHub webhook, and reports a status check back to the PR. README: a GitHub Actions vs Jenkins comparison, the flaky-vs-CI trade-off, and an architecture diagram. Note: JUnit XML has no "flaky" status, so the flake report is the only place flakiness shows up in Jenkins.
+
+**Phase 5: A second platform (Windows + Edge).** Mirror the "Linux tests and Windows tests" split of a real player team.
+- **Playwright projects:** keep `unit` and `chromium`; add `edge` (`channel: 'msedge'`). Platform-specific tests carry a tag (e.g. `@windows-edge`) and only the matching project runs them, so there is one test codebase.
+- **Platform-specific test:** a DRM capability check that records which key systems each platform offers (ClearKey, Widevine, PlayReady) via `navigator.requestMediaKeySystemAccess`. The first run only records and attaches the results; add assertions only after real results have been seen on each platform (verify, don't assume).
+- **GitHub Actions:** two jobs that run in parallel and report separately: Linux + Chromium (`ubuntu-latest`) and Windows + Edge (`windows-latest`, where Edge is preinstalled). Both run the unit tests. Keep the Linux job's check name `test` until the merge ruleset is updated, or every PR is blocked by a required check that never reports.
+- **Jenkins:** a Windows agent (a Windows VM Tyler provides) labelled `windows`, connected by the controller over SSH so Jenkins stays private. The `Jenkinsfile` gets `agent none` and parallel `linux-chromium` / `windows-edge` stages; the Windows stage runs directly on the agent with `bat` (no Docker), with Java, Node 22, Git and Edge installed there.
+- **Cross-platform check:** anything run on Windows must not rely on POSIX shell syntax (e.g. `CHAOS=1 cmd` in npm scripts), and paths must use Node's `path` module.
+- **README:** the platform matrix, what differs per platform (DRM, codecs), and the updated architecture diagram.
+
+## Infrastructure (outside the repo)
+
+- Jenkins runs as a Docker container on Tyler's Linux VM, built from `~/jenkins-local/Dockerfile` (official LTS image + Docker CLI + plugins), bound to `127.0.0.1:8080` only. It uses the host's Docker socket to start build containers.
+- Caddy on the same VM exposes only `POST /github-webhook/` over HTTPS and returns 404 for everything else. GitHub signs webhook deliveries with a shared secret that Jenkins verifies. Never expose the Jenkins UI publicly: it has root-equivalent access to the VM through the Docker socket.
+- Tyler reaches the Jenkins UI through an SSH tunnel from his iPad (Blink). Build logs can be read on the VM under `/var/jenkins_home/jobs/` inside the `jenkins` container.
 
 ## Interview framing
 
