@@ -15,6 +15,9 @@ export default defineConfig({
     // Machine-readable results (every attempt, annotations, attachments) for
     // scripts/flake-report.ts and scripts/metrics-report.ts.
     ['json', { outputFile: 'results/report.json' }],
+    // JUnit XML is the format Jenkins (and most CI servers) read natively to
+    // show per-test results and history.
+    ['junit', { outputFile: 'results/junit.xml' }],
   ],
 
   use: {
