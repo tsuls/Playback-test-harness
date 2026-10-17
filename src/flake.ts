@@ -1,4 +1,7 @@
-import type { AttemptStatus, FlakeSummary, RunOutcome, TestRun } from './types';
+// A normal import (not `import type`): enums exist at runtime, and this file
+// uses their members as values, e.g. AttemptStatus.Passed.
+import { AttemptStatus, RunOutcome } from './types';
+import type { FlakeSummary, TestRun } from './types';
 
 /**
  * How one run ended, given its attempts in order:
@@ -9,17 +12,16 @@ import type { AttemptStatus, FlakeSummary, RunOutcome, TestRun } from './types';
  */
 export function classifyRun(attempts: readonly AttemptStatus[]): RunOutcome {
    let countPasses = 0;
-   let countFails = 0;
    let countSkips = 0;
-   
-   for(int i = 0; i < attempts.length; i++){
+
+   for(let i = 0; i < attempts.length; i++){
       // Is this attempt a pass?
-      if(attemps[i] == AttemptStatus.Pass){
-        // it is a pass. 
+      if(attempts[i] === AttemptStatus.Passed){
+        // it is a pass.
         //first element check
-        if(i == 0){
+        if(i === 0){
           //if the first attempt passed, then return
-          return RunOutcome.Pass
+          return RunOutcome.Pass;
         }
         else{
           // otherwise, mark a pass;
@@ -27,35 +29,24 @@ export function classifyRun(attempts: readonly AttemptStatus[]): RunOutcome {
         }
       }
 
-      // Next, we need to continue, if it is not a pass, what is it?
-      if(attempts[i] == AttemptStatus.Failed || attempts[i] == AttemptStatus.TimedOut 
-        || attempts[i] == AttemptStatus.Interrupted){
-          // This is a fail. Count a fail
-          countFails++;
-      }
-
       // Then, skips
-      if(attempts[i] == AttemptStatus.Skipped){
+      if(attempts[i] === AttemptStatus.Skipped){
         countSkips++;
       }
     }
 
     // If every attempt is a skip
-    if(countSkips == attempts.length){
+    if(countSkips === attempts.length){
       return RunOutcome.Skipped;
     }
 
-    // if every attempt is a fail
-    if(countFails == attempts.length){
+    // if no attempt passed, it's a fail. Failed, timedOut and interrupted all
+    // count as "did not pass", so there is no need to count them separately.
+    if(countPasses === 0){
       return RunOutcome.Fail;
     }
 
-    // if every attempt is a pass (this wont happen)
-    if(countPasses == attempts.length){
-      return RunOutcome.Pass
-    }
-
-    //Otherwise, its flaky. 
+    //Otherwise, a later attempt passed after an earlier one did not: it's flaky.
     return RunOutcome.Flaky;
 }
 
@@ -64,57 +55,56 @@ export function classifyRun(attempts: readonly AttemptStatus[]): RunOutcome {
  * every count, including `runs`. Output is sorted by title.
  */
 export function summarizeFlakes(runs: readonly TestRun[]): FlakeSummary[] {
-  // create a shallow copy
-  let testRunCopy = [...runs];
-
   // We need a map, to access each FlakeSummary by title
-  const flakeSummaryMap: Map<string, FlakeSummary>;
+  const flakeSummaryMap = new Map<string, FlakeSummary>();
 
   //now, for each run
-  for(run of runs){
-    //obtain its RunOutcome
-    let outcome = classifyRun(run);
+  for(const run of runs){
+    // get the existing summary to update in the map
+    let summary = flakeSummaryMap.get(run.title);
 
-    //skip if Skipped
-    if(outcome != RunOutcome.Skipped){
-      
-      // get the existing summary to update in the map
-      let summary = flakeSummaryMap.get(run.title);
-
-      //if its not in the map, its a new entry and we should create it
-      if(!summary){
-        summary = {
-          title: run.title,
-          runs: 0,
-          passes: 0,
-          failures: 0,
-          flaky: 0,
-          flakeRate: 0
-        };
-        //add to the map
-        flakeSummaryMap.insert(summary);
-      }
-
-        // now update the counters by reference
-        summary.runs += 1;
-
-        if(outcome == RunOutcome.Pass){
-          summary.passes += 1;
-        }
-        else if (outcome == RunOutcome.Fail){
-          summary.failures += 1;
-        }
-        else if (outcome == RunOutcome.Flaky){
-          summary.flaky += 1;
-        }
-
-        // recalculate flake rate (flaky / runs) don't divide by zero. zero runs is zero flakes.
-        summary.flakeRate = summary.runs > 0 ? summary.flaky / summary.runs : 0;
+    //if its not in the map, its a new entry and we should create it.
+    // This happens before the skip check so a test whose runs were all
+    // skipped still shows up in the report, with every count at 0.
+    if(!summary){
+      summary = {
+        title: run.title,
+        runs: 0,
+        passes: 0,
+        failures: 0,
+        flaky: 0,
+        flakeRate: 0
+      };
+      //add to the map
+      flakeSummaryMap.set(run.title, summary);
     }
 
+    //obtain its RunOutcome
+    const outcome = classifyRun(run.attempts);
 
+    //skip if Skipped: it is not counted
+    if(outcome === RunOutcome.Skipped){
+      continue;
+    }
+
+    // now update the counters by reference
+    summary.runs += 1;
+
+    if(outcome === RunOutcome.Pass){
+      summary.passes += 1;
+    }
+    else if (outcome === RunOutcome.Fail){
+      summary.failures += 1;
+    }
+    else if (outcome === RunOutcome.Flaky){
+      summary.flaky += 1;
+    }
+
+    // recalculate flake rate (flaky / runs) don't divide by zero. zero runs is zero flakes.
+    summary.flakeRate = summary.runs > 0 ? summary.flaky / summary.runs : 0;
   }
 
-  // now return the final summary array
-  return flakeSummaryMap.values();
+  // now return the final summary array, sorted by title.
+  // .values() is an iterator, so spread it into an array first.
+  return [...flakeSummaryMap.values()].sort((a, b) => a.title.localeCompare(b.title));
 }

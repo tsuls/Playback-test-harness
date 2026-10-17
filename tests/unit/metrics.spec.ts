@@ -38,6 +38,14 @@ test.describe('percentile (nearest-rank)', () => {
     expect(input).toEqual([90, 10, 50, 30, 70]);
   });
 
+  test('no floating-point off-by-one in the rank', () => {
+    // (7 / 100) * 100 is 7.000000000000001 in floating point; ceil would make it rank 8.
+    const oneToHundred = Array.from({ length: 100 }, (_, i) => i + 1);
+    expect(percentile(oneToHundred, 7)).toBe(7);
+    expect(percentile(oneToHundred, 14)).toBe(14);
+    expect(percentile(oneToHundred, 28)).toBe(28);
+  });
+
   test('handles duplicates', () => {
     expect(percentile([7, 7, 7, 1], 50)).toBe(7);
   });
