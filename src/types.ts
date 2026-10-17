@@ -35,7 +35,13 @@ export interface RunMetrics {
  * Status of one attempt of a test, as Playwright reports it
  * (same values as Playwright's `TestResult.status`).
  */
-export type AttemptStatus = 'passed' | 'failed' | 'timedOut' | 'skipped' | 'interrupted';
+export enum AttemptStatus {
+  Passed = 'passed',
+  Failed = 'failed',
+  TimedOut = 'timedOut',
+  Skipped = 'skipped',
+  Interrupted = 'interrupted'
+}
 
 /**
  * One run of one test. With `--repeat-each=3 --retries=1`, every test produces
@@ -49,7 +55,13 @@ export interface TestRun {
 }
 
 /** How a single TestRun ended, after retries. */
-export type RunOutcome = 'pass' | 'fail' | 'flaky' | 'skipped';
+export enum RunOutcome {
+  Pass = 'pass',
+  Fail = 'fail',
+  Flaky = 'flaky',
+  Skipped = 'skipped'
+}
+
 
 /** Per-test summary printed by the flake report. */
 export interface FlakeSummary {
