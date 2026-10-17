@@ -6,7 +6,16 @@ export default defineConfig({
   testDir: 'tests',
   // Network playback is slow and variable; give each test room.
   timeout: 60_000,
-  reporter: [['list'], ['html', { open: 'never' }]],
+  // A test that fails and then passes on its retry is reported as "flaky".
+  // That label is the signal the flake report counts.
+  retries: 1,
+  reporter: [
+    ['list'],
+    ['html', { open: 'never' }],
+    // Machine-readable results (every attempt, annotations, attachments) for
+    // scripts/flake-report.ts and scripts/metrics-report.ts.
+    ['json', { outputFile: 'results/report.json' }],
+  ],
 
   use: {
     // Lets tests call page.goto('/?src=...') instead of repeating the host.

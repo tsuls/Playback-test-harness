@@ -12,8 +12,10 @@
   <video id="video" muted autoplay playsinline></video>
 
   <script>
-    // Usage: /?src=<manifest URL>[&abr=off]
-    //   abr=off  disables adaptive bitrate and pins the highest-bandwidth variant.
+    // Usage: /?src=<manifest URL>[&abr=off][&clearkey=<keyId hex>:<key hex>][&start=<seconds>]
+    //   abr=off   disables adaptive bitrate and pins the highest-bandwidth variant.
+    //   clearkey  decrypts a ClearKey-protected stream with this key, through EME.
+    //   start     starts playback at this position (passed to player.load, so no seek).
     //
     // Every event is pushed into window.__events as
     //   { type, source, t, detail? }
@@ -26,6 +28,8 @@
     const params = new URLSearchParams(location.search);
     const src = params.get('src');
     const abrOff = params.get('abr') === 'off';
+    const clearKey = params.get('clearkey');
+    const start = params.has('start') ? Number(params.get('start')) : undefined;
     const video = document.getElementById('video');
 
     // Media element events.
@@ -64,10 +68,16 @@
       });
 
       if (abrOff) player.configure('abr.enabled', false);
+      if (clearKey) {
+        // ClearKey is the one key system every browser must support. The key is
+        // handed over in plain text, so it tests the EME path without a licence server.
+        const [keyId, key] = clearKey.split(':');
+        player.configure({ drm: { clearKeys: { [keyId]: key } } });
+      }
 
       // TTFF is measured from this mark, i.e. from the moment we ask Shaka to load.
       record('load-start', 'page');
-      await player.load(src);
+      await player.load(src, start);
 
       if (abrOff) {
         const highest = player.getVariantTracks().sort((a, b) => b.bandwidth - a.bandwidth)[0];
