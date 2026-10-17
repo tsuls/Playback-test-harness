@@ -75,6 +75,22 @@ And the chaos demo, 10 runs:
 
 CI writes both tables to each run's summary page and uploads the HTML report and `results/` as artifacts.
 
+## Jenkins
+
+GitHub Actions is the CI that runs on every push. The same pipeline is also defined for Jenkins in [`Jenkinsfile`](Jenkinsfile), for teams that run their own CI server. It needs the Docker Pipeline plugin and Docker on the agent, and runs inside Microsoft's Playwright image, which already includes Chromium and its Linux libraries.
+
+| | GitHub Actions (`ci.yml`) | Jenkins (`Jenkinsfile`) |
+| --- | --- | --- |
+| Where it runs | GitHub's Ubuntu machines | Your Jenkins agent, in `mcr.microsoft.com/playwright` |
+| Browser setup | `npx playwright install --with-deps chromium` | Already in the image |
+| Steps | `steps:` with `run:` | `stages` with `sh` |
+| Run even if tests fail | `if: ${{ !cancelled() }}` | `post { always { … } }` |
+| Flake and metrics tables | Job summary page | Build log, plus archived `results/*.md` |
+| Per-test results | Inline in the logs and HTML report | JUnit page from `results/junit.xml` |
+| Artifacts | `actions/upload-artifact` | `archiveArtifacts` |
+
+JUnit XML has no "flaky" status: a test that passes on retry shows up in Jenkins as a plain pass. The flake report is what makes flakiness visible on both systems.
+
 ## Known constraints
 
 - **DRM:** headless Chromium has no Widevine, so the suite uses clear streams plus one ClearKey stream. ClearKey exercises the same EME path without a licence server.
@@ -98,6 +114,7 @@ scripts/flake-report.ts    JSON report → flake table
 scripts/metrics-report.ts  JSON report → results/metrics.json + summary table
 scripts/serve.mjs          static server started by Playwright's webServer
 .github/workflows/ci.yml   CI on every push and pull request
+Jenkinsfile                the same pipeline for Jenkins
 ```
 
 ## What to add next
