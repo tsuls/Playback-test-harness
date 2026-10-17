@@ -22,13 +22,35 @@ export interface PlaybackEvent {
   detail?: Record<string, unknown>;
 }
 
-/** Metrics computed for a single playback run. Phase 1 fills in TTFF only. */
+/** Metrics computed for a single playback run, from our own events. */
 export interface RunMetrics {
   /** Time to first frame in ms: from `load-start` to `first-frame`. */
   ttffMs: number;
-  rebufferCount?: number;
-  rebufferMs?: number;
-  errorCodes?: number[];
+  /** Each `waiting` after the first `playing`, up to the next `playing`. */
+  rebufferCount: number;
+  rebufferMs: number;
+  /** One entry per error event, as "source:code", e.g. "shaka:3014" or "video:3". */
+  errors: string[];
+  /** The same things as Shaka measured them, for the cross-check. */
+  shaka: ShakaCrossCheck;
+}
+
+/**
+ * Shaka's view of the same run, from `player.getStats()`.
+ *
+ * - `rebufferCount` / `rebufferMs` are rebuilt from Shaka's `stateHistory`
+ *   (buffering periods after the first `playing`), so they compare like-for-like
+ *   with ours.
+ * - `bufferingMs` is Shaka's own `bufferingTime`, which also counts startup buffering.
+ * - `stallsDetected` counts Shaka's stall detector firing, which is for a playhead
+ *   stuck *with* data buffered, not for an empty buffer.
+ */
+export interface ShakaCrossCheck {
+  ttffMs: number;
+  rebufferCount: number;
+  rebufferMs: number;
+  bufferingMs: number;
+  stallsDetected: number;
 }
 
 /**

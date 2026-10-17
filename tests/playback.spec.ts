@@ -1,14 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { STREAMS } from '../src/streams';
-import {
-  errorEvents,
-  pageUrl,
-  readEvents,
-  readShakaStats,
-  timeToFirstFrame,
-  waitForFirstFrame,
-  waitForPlayhead,
-} from '../src/collect';
+import { PAST_CLEAR_LEAD_SECONDS, STREAMS } from '../src/streams';
+import { pageUrl, readEvents, recordRun, waitForFirstFrame, waitForPlayhead } from '../src/collect';
 
 /** How much content must play before we call a run successful. */
 const PLAY_SECONDS = 5;
@@ -32,28 +24,46 @@ test('browser reports H.264/AAC support', async ({ page }) => {
 });
 
 test('clear stream starts and plays', async ({ page }) => {
-  const stream = STREAMS.angelOneClear;
-  await page.goto(pageUrl(stream));
-
+  await page.goto(pageUrl(STREAMS.angelOneClear));
   await waitForFirstFrame(page);
   await waitForPlayhead(page, PLAY_SECONDS);
 
-  const events = await readEvents(page);
-  const stats = await readShakaStats(page);
-  const ttffMs = timeToFirstFrame(events);
+  const { metrics } = await recordRun(page);
 
-  const info = test.info();
-  info.annotations.push(
-    { type: 'ttff_ms', description: ttffMs.toFixed(0) },
-    // Shaka's own measurement, for comparison. It starts its clock at a slightly
-    // different point inside load(), so expect a small gap, not an exact match.
-    { type: 'shaka_ttff_ms', description: (stats.timeToFirstFrame * 1000).toFixed(0) },
-    { type: 'codecs', description: `${stats.currentCodecs} @ ${stats.width}x${stats.height}` },
-  );
-  await info.attach('events.json', { body: JSON.stringify(events, null, 2), contentType: 'application/json' });
-
-  expect(errorEvents(events)).toEqual([]);
-  expect(ttffMs).toBeGreaterThan(0);
+  expect(metrics.errors).toEqual([]);
+  expect(metrics.ttffMs).toBeGreaterThan(0);
   // Generous bound: this is a smoke check against "never started", not a perf target.
-  expect(ttffMs).toBeLessThan(20_000);
+  expect(metrics.ttffMs).toBeLessThan(20_000);
+});
+
+test.describe('ClearKey (EME)', () => {
+  // Both tests start at 20 s, past the stream's unencrypted "clear lead".
+  // Without that, a wrong key would also appear to play.
+  const start = PAST_CLEAR_LEAD_SECONDS;
+
+  test('decrypts and plays with the right key', async ({ page }) => {
+    await page.goto(pageUrl(STREAMS.angelOneClearKey, { start }));
+    await waitForFirstFrame(page);
+    await waitForPlayhead(page, start + PLAY_SECONDS);
+
+    // keySystem() is the EME key system Shaka actually used ('' means none).
+    expect(await page.evaluate(() => window.__player.keySystem())).toBe('org.w3.clearkey');
+    const { metrics } = await recordRun(page);
+    expect(metrics.errors).toEqual([]);
+  });
+
+  // A negative control: proves the test above really depends on decryption.
+  test('fails to decode with a wrong key', async ({ page }) => {
+    const wrongKey = 'feedf00deedeadbeeff0baadf00dd00d:ffffffffffffffffffffffffffffffff';
+    await page.goto(pageUrl(STREAMS.angelOneClearKey, { start, clearKey: wrongKey }));
+
+    await page.waitForFunction(() => window.__events.some((e) => e.type === 'error'), undefined, {
+      timeout: 30_000,
+    });
+    const errors = (await readEvents(page)).filter((e) => e.type === 'error');
+    await test.info().attach('errors.json', { body: JSON.stringify(errors, null, 2), contentType: 'application/json' });
+    // We saw MEDIA_ERR_DECODE (3) from the video element and Shaka 3014/3015, but
+    // the exact codes are Chromium's business; assert only that decoding failed.
+    expect(errors.length).toBeGreaterThan(0);
+  });
 });
