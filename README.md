@@ -18,6 +18,67 @@ npm run test:chaos    # demo: a deliberately flaky test, run 10 times
 
 Developed and verified on Node 22, which is also what CI uses.
 
+## Architecture
+
+```mermaid
+flowchart TB
+  dev([Developer]) -- "push / open PR" --> gh[("GitHub repository")]
+
+  gh -- "workflow trigger" --> gha["GitHub Actions<br/>Ubuntu runner"]
+  gh -- "signed webhook" --> caddy
+
+  subgraph vm ["Self-hosted VM"]
+    caddy["Caddy reverse proxy<br/>exposes only POST /github-webhook/"] --> jenkins["Jenkins<br/>Multibranch Pipeline"]
+    jenkins --> agent["Docker agent<br/>Playwright image"]
+  end
+
+  gha --> runner
+  agent --> runner
+
+  cdn[("Shaka demo streams on a public CDN<br/>clear + ClearKey DASH")]
+
+  subgraph run ["Test run, same on both CIs"]
+    runner["Playwright Test<br/>retries: 1, --repeat-each=3"]
+    server["scripts/serve.mjs<br/>(webServer)"]
+    subgraph chromium ["Headless Chromium"]
+      page["site/index.html<br/>Shaka Player"]
+      events["window.__events<br/>+ player.getStats()"]
+      page --> events
+    end
+    collect["src/collect.ts<br/>TTFF, rebuffers, errors,<br/>Shaka cross-check"]
+    reporters["Reporters<br/>list, HTML, JSON, JUnit"]
+
+    runner -- starts --> server
+    server -- "page + Shaka" --> page
+    page -- "manifest + segments" --> cdn
+    runner -- "CDP: throttle network" --> chromium
+    events -- "page.evaluate" --> collect
+    collect -- "annotations + metrics attachment" --> reporters
+  end
+
+  subgraph reports ["Reports"]
+    flake["scripts/flake-report.ts<br/>uses src/flake.ts"]
+    metrics["scripts/metrics-report.ts<br/>uses src/metrics.ts"]
+    out["results/<br/>flakes.md, summary.md,<br/>metrics.json"]
+    flake --> out
+    metrics --> out
+  end
+
+  reporters -- "results/report.json" --> flake
+  reporters -- "results/report.json" --> metrics
+
+  out --> ghsum["GitHub job summary<br/>+ artifacts"]
+  out --> jart["Jenkins build log, JUnit page<br/>+ archived artifacts"]
+  reporters -- "results/junit.xml" --> jart
+
+  gha -- "status check: test" --> pr{{"Pull request<br/>ruleset: 'test' must pass to merge"}}
+  jenkins -- "status check: jenkins/pr-merge" --> pr
+```
+
+- **Two CI systems, one test run.** GitHub Actions runs on GitHub's machines. Jenkins runs on a self-hosted VM, triggered by a GitHub webhook. Both run the same commands, so the test run in the middle is identical.
+- **Only the webhook is public.** Caddy forwards just `POST /github-webhook/` to Jenkins; everything else gets a 404, and the Jenkins UI stays private. GitHub signs each delivery with a shared secret that Jenkins verifies.
+- **Measurements come from inside the browser.** The page records events; `src/collect.ts` reads them out and turns them into metrics, which travel through Playwright's reporters to the report scripts.
+
 ## What it measures, and how
 
 `site/index.html` is a small test page that loads Shaka Player, plays the manifest given in `?src=`, and pushes timestamped events into `window.__events`. Playwright opens the page, lets it play, then reads the events and `player.getStats()` back out.
@@ -55,7 +116,19 @@ Every run also records Shaka's view of the same playback. What we found:
 3. Playwright's JSON reporter writes every attempt to `results/report.json`.
 4. `scripts/flake-report.ts` reads that file and prints, per test: runs, passes, failures, flaky runs and the flake rate (flaky / runs).
 
-Flaky runs are tracked, not blocking: CI fails only on a real failure. `tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time. It only runs with `CHAOS=1`, so the report has something to catch.
+`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time. It only runs with `CHAOS=1`, so the report has something to catch.
+
+### Should a flaky test fail CI?
+
+Here, no: **flaky runs are tracked, not blocking.** CI fails only on a real failure (a test that fails both attempts). The trade-off:
+
+| Fail CI on flakes | Don't fail CI on flakes |
+| --- | --- |
+| Flakes can't pile up unnoticed, and a "flaky" test is sometimes hiding a real bug, such as a race condition in the player. | A flaky failure is usually not caused by the pull request, so blocking it punishes the wrong change. |
+| Forces someone to fix or quarantine the test. | Avoids teaching people to hit "re-run" until CI is green, a habit that ends up hiding real failures too. |
+| | Tolerates network noise, which matters for tests that stream from a public CDN. |
+
+The usual compromise is to keep pull requests lenient but make flakes impossible to ignore: every run publishes the flake report, and a stricter run elsewhere fails on any flake (see *What to add next*).
 
 ## Sample results
 
@@ -121,4 +194,5 @@ Jenkinsfile                the same pipeline for Jenkins
 
 - **A device matrix:** run the same suite across browsers (Firefox, WebKit) and real Chrome, on Linux, macOS and Windows.
 - **Real TVs and streaming devices:** drive the same test page on living-room hardware, where decoders, memory and network stacks differ most from a desktop browser.
+- **A nightly strict run:** a scheduled CI run on `main` with Playwright's `--fail-on-flaky-tests`, so any flake turns the nightly build red and gets fixed the next day, while pull requests stay lenient.
 - **Regression alerts against a baseline:** store each `main` run's `metrics.json`, and flag a pull request when TTFF p95 or rebuffer time gets meaningfully worse than the baseline, or when a test's flake rate rises.
