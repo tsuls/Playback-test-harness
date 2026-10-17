@@ -24,6 +24,7 @@ const table = markdownTable(
   ]),
 );
 
-const markdown = `## Flake report\n\n${table}\n`;
+// Trailing blank line so another report can be appended after it (CI's job summary).
+const markdown = `## Flake report\n\n${table}\n\n`;
 writeFileSync('results/flakes.md', markdown);
 console.log(markdown);

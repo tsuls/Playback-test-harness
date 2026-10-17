@@ -60,6 +60,7 @@ const table = markdownTable(
   ]),
 );
 
-const markdown = `## Playback metrics\n\n${table}\n`;
+// Trailing blank line so another report can be appended after it (CI's job summary).
+const markdown = `## Playback metrics\n\n${table}\n\n`;
 writeFileSync('results/summary.md', markdown);
 console.log(markdown);

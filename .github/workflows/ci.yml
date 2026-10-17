@@ -1,0 +1,71 @@
+# Runs the whole suite on every push and pull request.
+#
+# GitHub Actions basics: a *workflow* (this file) has *jobs*; each job runs on a
+# fresh virtual machine (`runs-on`) and executes its *steps* in order. A step
+# either runs a shell command (`run`) or reuses a published action (`uses`).
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# The job only needs to read the repository.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          # The version the suite was developed and verified on.
+          node-version: 22
+          # Caches npm's download cache between runs, keyed on package-lock.json.
+          cache: npm
+
+      # `npm ci` installs exactly what package-lock.json says, and fails if
+      # package.json and the lock file disagree.
+      - run: npm ci
+
+      # Downloads Playwright's Chromium plus the Linux libraries it needs to run.
+      - run: npx playwright install --with-deps chromium
+
+      - name: Type check
+        run: npx tsc
+
+      # --repeat-each=3 runs every test three times, so each CI run also produces
+      # flake data. With `retries: 1` in the config, a test that fails and then
+      # passes on retry is reported as flaky and does NOT fail the job; a test
+      # that fails both attempts does.
+      - name: Run tests
+        run: npx playwright test --repeat-each=3
+
+      # The steps below run even if the tests failed (but not if the run was
+      # cancelled): failures are exactly when the reports matter most.
+      - name: Write flake and metrics reports to the job summary
+        if: ${{ !cancelled() }}
+        run: |
+          npm run report
+          cat results/flakes.md results/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: results
+          path: results/
+          retention-days: 14
