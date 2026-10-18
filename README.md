@@ -34,14 +34,20 @@ flowchart TB
 
   gh -- "signed webhook" --> caddy
 
-  subgraph vm ["Self-hosted VM"]
+  subgraph vm ["Self-hosted Linux VM"]
     caddy["Caddy reverse proxy<br/>exposes only POST /github-webhook/"] --> jenkins["Jenkins<br/>Multibranch Pipeline"]
-    jenkins --> agent["Docker agent<br/>Playwright image"]
+    jenkins -- "stage linux-chromium" --> agent["Docker agent<br/>Playwright image"]
   end
+
+  subgraph winvm ["Self-hosted Windows VM"]
+    winagent["Jenkins agent windows-edge<br/>label: windows, Edge installed"]
+  end
+  jenkins -- "stage windows-edge<br/>(controller connects over SSH)" --> winagent
 
   linux --> runner
   win --> runner
   agent --> runner
+  winagent --> runner
 
   cdn[("Shaka demo streams on a public CDN<br/>clear + ClearKey DASH")]
 
@@ -84,7 +90,7 @@ flowchart TB
 ```
 
 - **Two CI systems, one test run.** GitHub Actions runs on GitHub's machines. Jenkins runs on a self-hosted VM, triggered by a GitHub webhook. Both run the same commands, so the test run in the middle is identical.
-- **Two platforms, one test codebase.** `playwright.config.ts` picks the browser from the OS. A matrix job runs the same steps on Linux and Windows, and one gate job reports the overall result.
+- **Two platforms, one test codebase.** `playwright.config.ts` picks the browser from the OS. Each CI runs the same steps on Linux and Windows in parallel and reports one overall result: GitHub Actions through a matrix job and a gate job, Jenkins through parallel stages on a Linux and a Windows agent.
 - **Only the webhook is public.** Caddy forwards just `POST /github-webhook/` to Jenkins; everything else gets a 404, and the Jenkins UI stays private. GitHub signs each delivery with a shared secret that Jenkins verifies.
 - **Measurements come from inside the browser.** The page records events; `src/collect.ts` reads them out and turns them into metrics, which travel through Playwright's reporters to the report scripts.
 
@@ -189,17 +195,29 @@ It runs on pull requests, and on pushes to `main` only. Running on every push as
 
 ## Jenkins
 
-GitHub Actions is the CI that runs on every push. The same pipeline is also defined for Jenkins in [`Jenkinsfile`](Jenkinsfile), for teams that run their own CI server. It needs the Docker Pipeline plugin and Docker on the agent, and runs inside Microsoft's Playwright image, which already includes Chromium and its Linux libraries.
+The same pipeline is also defined for Jenkins in [`Jenkinsfile`](Jenkinsfile), for teams that run their own CI server. A Multibranch Pipeline job builds every branch and pull request, triggered by the GitHub webhook, and reports one status check back to the PR.
+
+The pipeline has `agent none` and a `Platforms` stage that runs two stages in `parallel`, with `failFast false`, so one platform failing doesn't abort the other:
+
+- **`linux-chromium`** runs inside Microsoft's Playwright Docker image, which already includes Chromium and its Linux libraries. It needs the Docker Pipeline plugin and Docker on the agent.
+- **`windows-edge`** runs on any agent labelled `windows`, directly on the machine with `bat` steps (no Docker). The agent needs Java, Node 22, Git and Edge. The Jenkins controller connects to it over SSH (SSH Build Agents plugin), with its own key and a pinned host key, so the Windows machine never has to reach Jenkins and the Jenkins UI stays private.
 
 | | GitHub Actions (`ci.yml`) | Jenkins (`Jenkinsfile`) |
 | --- | --- | --- |
-| Where it runs | GitHub's Ubuntu and Windows machines | Your Jenkins agent, in `mcr.microsoft.com/playwright` (Linux) |
-| Browser setup | `npx playwright install --with-deps chromium` | Already in the image |
-| Steps | `steps:` with `run:` | `stages` with `sh` |
+| Where it runs | GitHub's Ubuntu and Windows machines | Your agents: Docker on Linux, a self-hosted Windows VM |
+| Two platforms | A matrix job | Parallel stages, each with its own `agent` |
+| One overall result | Gate job `CI passed` | The pipeline's own status |
+| Browser setup | Linux: `npx playwright install --with-deps chromium`; Windows: none | Linux: already in the image; Windows: none |
+| Steps | `steps:` with `run:` (bash on both) | `sh` on Linux, `bat` on Windows |
 | Run even if tests fail | `if: ${{ !cancelled() }}` | `post { always { … } }` |
 | Flake and metrics tables | Job summary page | Build log, plus archived `results/*.md` |
 | Per-test results | Inline in the logs and HTML report | JUnit page from `results/junit.xml` |
-| Artifacts | `actions/upload-artifact` | `archiveArtifacts` |
+| Artifacts | `actions/upload-artifact`, named per platform | `archiveArtifacts` of `archive/<platform>/` |
+
+Two Windows details:
+
+- **Artifact paths.** Both stages produce `results/` and `playwright-report/` in the same build, and `archiveArtifacts` can't add a prefix, so one would overwrite the other. `scripts/archive-results.mjs` copies them into `archive/<platform>/` first. It's written in Node so the same command works on both OSes.
+- **`call npx …`.** On Windows `npx` is a `.cmd` script, and without `call`, `cmd` hands control to it and never runs the `|| echo skipped` that follows.
 
 JUnit XML has no "flaky" status: a test that passes on retry shows up in Jenkins as a plain pass. The flake report is what makes flakiness visible on both systems.
 
@@ -227,7 +245,8 @@ scripts/metrics-report.ts  JSON report → results/metrics.json + summary table
 scripts/serve.mjs          static server started by Playwright's webServer
 playwright.config.ts       projects: unit, plus chromium (Linux) or edge (Windows)
 .github/workflows/ci.yml   CI matrix (Linux + Windows) and the "CI passed" gate
-Jenkinsfile                the same pipeline for Jenkins
+Jenkinsfile                the same pipeline for Jenkins: parallel Linux and Windows stages
+scripts/archive-results.mjs  copy reports into archive/<platform>/ for Jenkins
 ```
 
 ## What to add next
