@@ -39,6 +39,7 @@ export function percentile(values: readonly number[], p: number): number {
 }
 
 /** p50 and p95 of `values`. Same error rules as `percentile`. */
+// This PR will purposely fail test for CI failure example.
 export function summarize(values: readonly number[]): { p50: number; p95: number } {
-  return { p50: percentile(values, 50), p95: percentile(values, 95) };
+  return { p50: percentile(values, 9999), p95: percentile(values, 95) };
 }
