@@ -2,6 +2,11 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 3000;
 
+// Each platform tests its own browser: Playwright's Chromium on Linux, Microsoft
+// Edge on Windows. This matches the two CI jobs, and keeps `npm test` working on
+// both (Linux has no Edge; the Windows job doesn't need Chromium).
+const onWindows = process.platform === 'win32';
+
 export default defineConfig({
   testDir: 'tests',
   // Network playback is slow and variable; give each test room.
@@ -40,12 +45,32 @@ export default defineConfig({
   // browser tests are split so each can be run alone (`--project=unit`).
   projects: [
     { name: 'unit', testDir: 'tests/unit' },
-    {
-      name: 'chromium',
-      testIgnore: 'unit/**',
-      // Playwright's bundled Chromium. Phase 1 checked that it supports H.264/AAC,
-      // so the `chrome` channel is not needed.
-      use: { ...devices['Desktop Chrome'] },
-    },
+    onWindows
+      ? {
+          name: 'edge',
+          testIgnore: 'unit/**',
+          // `channel: 'msedge'` drives the Edge installed on the machine instead
+          // of a Playwright-downloaded browser. Edge is Chromium-based, so CDP
+          // (used by the throttling test) works the same way.
+          use: {
+            ...devices['Desktop Edge'],
+            channel: 'msedge',
+            launchOptions: {
+              // Playwright launches browsers with --disable-component-update,
+              // which stops Edge from registering its bundled Widevine module.
+              // Dropping that one flag makes Edge offer Widevine like a normal install.
+              ignoreDefaultArgs: ['--disable-component-update'],
+            },
+          },
+        }
+      : {
+          name: 'chromium',
+          testIgnore: 'unit/**',
+          // Tests tagged @edge describe Edge-on-Windows behaviour; skip them here.
+          grepInvert: /@edge/,
+          // Playwright's bundled Chromium. Phase 1 checked that it supports H.264/AAC,
+          // so the `chrome` channel is not needed.
+          use: { ...devices['Desktop Chrome'] },
+        },
   ],
 });
