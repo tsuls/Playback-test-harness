@@ -12,7 +12,7 @@ Owner: Tyler. He will present this in a technical interview on Oct 22, so he has
 4. **Keep it small.** No frameworks beyond the stack below. Few dependencies. If you want to add a package, ask first and say why.
 5. **No employer content.** This is a personal project. No references to any employer, internal system, codename or proprietary SDK anywhere in code, comments, commit suggestions or the README.
 6. **Verify, don't assume.** Run the tests after every change. If a stream URL, API or flag doesn't behave the way you expected, say so and show the evidence. Don't paper over it.
-7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles) and `src/flake.ts` (flake classification) are his to write. Create typed stubs that throw `new Error('TODO')` and write their unit tests. Don't implement the stubs unless he asks.
+7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles) and `src/flake.ts` (flake classification) are his. He has implemented both; don't rewrite them unless he asks. (Originally they were typed stubs throwing `new Error('TODO')`, and the unit tests skip themselves while a function is still a stub.)
 
 ## Stack
 
@@ -57,9 +57,12 @@ src/collect.ts             read events from the page, compute run metrics
 tests/playback.spec.ts     startup, steady playback, ClearKey
 tests/network.spec.ts      throttled stall and recovery
 tests/chaos.spec.ts        demo flaky test (CHAOS=1)
-tests/unit/*.spec.ts       unit tests for metrics.ts and flake.ts
+tests/drm-capabilities.spec.ts  key systems per platform; @edge Widevine test
+tests/unit/*.spec.ts       unit tests for metrics.ts, flake.ts and collect.ts
 scripts/flake-report.ts    JSON report to flake table
 scripts/metrics-report.ts  JSON report to results/metrics.json + summary table
+scripts/serve.mjs          static server for Playwright's webServer
+scripts/archive-results.mjs  copy reports into archive/<platform>/ (Jenkins)
 src/report.ts              shared reader for Playwright's JSON report
 .github/workflows/ci.yml
 Jenkinsfile
@@ -77,18 +80,19 @@ README.md
 
 **Phase 4: Jenkins (done).** A `Jenkinsfile` that mirrors `ci.yml`: a declarative pipeline running inside Microsoft's Playwright Docker image (tag matches the installed `@playwright/test`), `npm ci` → `tsc` → tests with `--repeat-each=3`, then a `post { always }` block that runs each report script separately, publishes `results/junit.xml` (Playwright's built-in JUnit reporter) and archives artifacts. A Multibranch Pipeline job builds every branch and PR from the origin repo (fork PRs are deliberately not built), triggered by a signed GitHub webhook, and reports a status check back to the PR. README: a GitHub Actions vs Jenkins comparison, the flaky-vs-CI trade-off, and an architecture diagram. Note: JUnit XML has no "flaky" status, so the flake report is the only place flakiness shows up in Jenkins.
 
-**Phase 5: A second platform (Windows + Edge).** Mirror the "Linux tests and Windows tests" split of a real player team.
-- **Playwright projects:** keep `unit` and `chromium`; add `edge` (`channel: 'msedge'`). Platform-specific tests carry a tag (e.g. `@windows-edge`) and only the matching project runs them, so there is one test codebase.
-- **Platform-specific test:** a DRM capability check that records which key systems each platform offers (ClearKey, Widevine) via `navigator.requestMediaKeySystemAccess`, and asserts only what has been observed: ClearKey everywhere, Widevine on Edge/Windows (`@edge`). PlayReady is out of scope: Edge on GPU-less Windows Server VMs never offers it.
+**Phase 5: A second platform (Windows + Edge) (done).** Mirror the "Linux tests and Windows tests" split of a real player team.
+- **Playwright projects (done):** `unit`, plus `chromium` on Linux or `edge` (`channel: 'msedge'`, with `--disable-component-update` removed so Widevine registers) on Windows, chosen by `process.platform`. Platform-specific tests carry the tag `@edge`; `chromium` excludes them with `grepInvert`, so there is one test codebase.
+- **Platform-specific test (done):** a DRM capability check that records which key systems each platform offers (ClearKey, Widevine) via `navigator.requestMediaKeySystemAccess`, and asserts only what has been observed: ClearKey everywhere, Widevine on Edge/Windows (`@edge`). PlayReady is out of scope: Edge on GPU-less Windows Server VMs never offers it.
 - **GitHub Actions (done):** one matrix job, `playback`, runs in parallel on `linux-chromium` (`ubuntu-latest`) and `windows-edge` (`windows-latest`, where Edge is preinstalled); both run the unit tests. A gate job `CI passed` (`needs: playback`, `if: always()`) is the only check the merge ruleset requires. `push` triggers only on `main`; PR branches run via `pull_request`, so each job reports once.
-- **Jenkins:** a Windows agent (a Windows VM Tyler provides) labelled `windows`, connected by the controller over SSH so Jenkins stays private. The `Jenkinsfile` gets `agent none` and parallel `linux-chromium` / `windows-edge` stages; the Windows stage runs directly on the agent with `bat` (no Docker), with Java, Node 22, Git and Edge installed there.
-- **Cross-platform check:** anything run on Windows must not rely on POSIX shell syntax (e.g. `CHAOS=1 cmd` in npm scripts), and paths must use Node's `path` module.
-- **README:** the platform matrix, what differs per platform (DRM, codecs), and the updated architecture diagram.
+- **Jenkins (done):** a Windows agent (a Windows VM Tyler provides) labelled `windows`, connected by the controller over SSH so Jenkins stays private. The `Jenkinsfile` has `agent none` and parallel `linux-chromium` / `windows-edge` stages (`failFast false`); the Windows stage runs directly on the agent with `bat` (no Docker), with Java, Node 22, Git and Edge installed there. Each stage copies its reports into `archive/<platform>/` (`scripts/archive-results.mjs`) before archiving, so the platforms don't overwrite each other.
+- **Cross-platform check:** anything run on Windows must not rely on POSIX shell syntax, and paths must use Node's `path` module. Known exception, documented in the README: `npm run test:chaos` uses `CHAOS=1 …`; CI never runs it.
+- **README (done):** the platform matrix, what differs per platform (DRM, codecs), the GitHub Actions and Jenkins sections, and the updated architecture diagram.
 
 ## Infrastructure (outside the repo)
 
 - Jenkins runs as a Docker container on Tyler's Linux VM, built from `~/jenkins-local/Dockerfile` (official LTS image + Docker CLI + plugins), bound to `127.0.0.1:8080` only. It uses the host's Docker socket to start build containers.
 - Caddy on the same VM exposes only `POST /github-webhook/` over HTTPS and returns 404 for everything else. GitHub signs webhook deliveries with a shared secret that Jenkins verifies. Never expose the Jenkins UI publicly: it has root-equivalent access to the VM through the Docker socket.
+- Windows agent: node `windows-edge` (label `windows`, 1 executor, workspace `C:\jenkins`) on Tyler's Lightsail Windows Server VM. The controller launches it over SSH (SSH Build Agents plugin) as `Administrator`, with its own ed25519 key stored as the SYSTEM-scoped credential `windows-agent-ssh` and a manually pinned host key. `javaPath` is plain `java` (on the machine PATH), because the launcher doesn't quote paths with spaces. The Lightsail firewall should allow port 22 only from the Linux VM. Keep the VM's IP out of the repo.
 - Tyler reaches the Jenkins UI through an SSH tunnel from his iPad (Blink). Build logs can be read on the VM under `/var/jenkins_home/jobs/` inside the `jenkins` container.
 
 ## Interview framing
