@@ -1,15 +1,18 @@
-# Runs the whole suite on every push and pull request, on two platforms:
-# Linux + Chromium (job `test`) and Windows + Edge (job `test-windows-edge`).
+# Runs the whole suite on two platforms, Linux + Chromium and Windows + Edge,
+# then reports one overall result: the `CI passed` check.
 #
 # GitHub Actions basics: a *workflow* (this file) has *jobs*; each job runs on a
 # fresh virtual machine (`runs-on`) and executes its *steps* in order. A step
 # either runs a shell command (`run`) or reuses a published action (`uses`).
-# Jobs run in parallel and each reports its own status check on the PR.
+# Jobs run in parallel unless one `needs` another.
 
 name: CI
 
 on:
+  # Pushes to a PR branch are already covered by `pull_request`; also running on
+  # every push would report each job twice. So `push` is only for main.
   push:
+    branches: [main]
   pull_request:
 
 # The jobs only need to read the repository.
@@ -17,11 +20,26 @@ permissions:
   contents: read
 
 jobs:
-  # The Linux job keeps the id `test`: the merge ruleset requires a check with
-  # exactly that name, so renaming it would block every PR.
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+  playback:
+    # A *matrix* runs this one job definition once per entry, in parallel:
+    # same steps, different machine. Each entry shows up as its own job.
+    strategy:
+      # Let every platform finish even if another fails, so each one reports.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-chromium
+            os: ubuntu-latest
+          - platform: windows-edge
+            os: windows-latest
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    # Run every `run:` step with bash (Git Bash on Windows, preinstalled on
+    # GitHub's Windows machines), so the commands are identical on both.
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - uses: actions/checkout@v7
@@ -37,8 +55,11 @@ jobs:
       # package.json and the lock file disagree.
       - run: npm ci
 
-      # Downloads Playwright's Chromium plus the Linux libraries it needs to run.
-      - run: npx playwright install --with-deps chromium
+      # Linux needs Playwright's Chromium plus the system libraries it runs on.
+      # Windows needs nothing: the `edge` project uses the preinstalled Edge.
+      - name: Install Chromium
+        if: ${{ runner.os == 'Linux' }}
+        run: npx playwright install --with-deps chromium
 
       - name: Type check
         run: npx tsc
@@ -46,8 +67,8 @@ jobs:
       # --repeat-each=3 runs every test three times, so each CI run also produces
       # flake data. With `retries: 1` in the config, a test that fails and then
       # passes on retry is reported as flaky and does NOT fail the job; a test
-      # that fails both attempts does. On Linux the config picks the `chromium`
-      # project (plus `unit`).
+      # that fails both attempts does. playwright.config.ts picks the browser
+      # project from the OS (chromium on Linux, edge on Windows).
       - name: Run tests
         run: npx playwright test --repeat-each=3
 
@@ -66,7 +87,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report-linux-chromium
+          name: playwright-report-${{ matrix.platform }}
           path: playwright-report/
           retention-days: 14
 
@@ -74,60 +95,19 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: results-linux-chromium
+          name: results-${{ matrix.platform }}
           path: results/
           retention-days: 14
 
-  test-windows-edge:
-    runs-on: windows-latest
-    timeout-minutes: 30
-    # Run every `run:` step with Git Bash (preinstalled on GitHub's Windows
-    # machines), so the commands are identical to the Linux job.
-    defaults:
-      run:
-        shell: bash
-
+  # The single check the merge ruleset requires. Adding a platform to the matrix
+  # then never means editing the ruleset.
+  ci-passed:
+    name: CI passed
+    needs: playback
+    # Run even when a platform failed; otherwise this job is skipped, and GitHub
+    # treats a skipped required check as passing.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: npm
-
-      - run: npm ci
-
-      # No browser download: Edge is preinstalled on GitHub's Windows machines,
-      # and the `edge` project uses it through `channel: 'msedge'`.
-
-      - name: Type check
-        run: npx tsc
-
-      # On Windows the config picks the `edge` project (plus `unit`), which also
-      # runs the Windows-only tests tagged @edge.
-      - name: Run tests
-        run: npx playwright test --repeat-each=3
-
-      - name: Flake report → job summary
-        if: ${{ !cancelled() }}
-        run: npx tsx scripts/flake-report.ts >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Metrics report → job summary
-        if: ${{ !cancelled() }}
-        run: npx tsx scripts/metrics-report.ts >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Upload HTML report
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report-windows-edge
-          path: playwright-report/
-          retention-days: 14
-
-      - name: Upload results
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: results-windows-edge
-          path: results/
-          retention-days: 14
+      # needs.playback.result is "success" only if every matrix entry succeeded.
+      - run: test "${{ needs.playback.result }}" = success
