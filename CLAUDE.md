@@ -89,6 +89,7 @@ README.md
 
 - Jenkins runs as a Docker container on Tyler's Linux VM, built from `~/jenkins-local/Dockerfile` (official LTS image + Docker CLI + plugins), bound to `127.0.0.1:8080` only. It uses the host's Docker socket to start build containers.
 - Caddy on the same VM exposes only `POST /github-webhook/` over HTTPS and returns 404 for everything else. GitHub signs webhook deliveries with a shared secret that Jenkins verifies. Never expose the Jenkins UI publicly: it has root-equivalent access to the VM through the Docker socket.
+- Windows agent: node `windows-edge` (label `windows`, 1 executor, workspace `C:\jenkins`) on Tyler's Lightsail Windows Server VM. The controller launches it over SSH (SSH Build Agents plugin) as `Administrator`, with its own ed25519 key stored as the SYSTEM-scoped credential `windows-agent-ssh` and a manually pinned host key. `javaPath` is plain `java` (on the machine PATH), because the launcher doesn't quote paths with spaces. The Lightsail firewall should allow port 22 only from the Linux VM. Keep the VM's IP out of the repo.
 - Tyler reaches the Jenkins UI through an SSH tunnel from his iPad (Blink). Build logs can be read on the VM under `/var/jenkins_home/jobs/` inside the `jenkins` container.
 
 ## Interview framing
