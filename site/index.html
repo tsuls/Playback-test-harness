@@ -12,8 +12,10 @@
   <video id="video" muted autoplay playsinline></video>
 
   <script>
-    // Usage: /?src=<manifest URL>[&abr=off][&clearkey=<keyId hex>:<key hex>][&start=<seconds>]
+    // Usage: /?src=<manifest URL>[&abr=off][&clearkey=<keyId hex>:<key hex>][&start=<seconds>][&config=<JSON>]
     //   abr=off   disables adaptive bitrate and pins the highest-bandwidth variant.
+    //   config    extra Shaka settings as JSON, passed to player.configure(), e.g.
+    //             {"abr":{"defaultBandwidthEstimate":100000}}. Used by experiments.
     //   clearkey  decrypts a ClearKey-protected stream with this key, through EME.
     //   start     starts playback at this position (passed to player.load, so no seek).
     //
@@ -30,6 +32,7 @@
     const abrOff = params.get('abr') === 'off';
     const clearKey = params.get('clearkey');
     const start = params.has('start') ? Number(params.get('start')) : undefined;
+    const config = params.has('config') ? JSON.parse(params.get('config')) : undefined;
     const video = document.getElementById('video');
 
     // Media element events.
@@ -43,7 +46,8 @@
     // presents. We only need the first one. `presentationTime` is when that
     // frame was handed to the compositor, on the same clock as performance.now().
     video.requestVideoFrameCallback((_now, meta) => {
-      window.__events.push({ type: 'first-frame', source: 'video', t: meta.presentationTime });
+      // meta.height is the first frame's resolution: the quality playback started at.
+      window.__events.push({ type: 'first-frame', source: 'video', t: meta.presentationTime, detail: { height: meta.height } });
     });
 
     async function main() {
@@ -67,6 +71,7 @@
         record('adaptation', 'shaka', v && { height: v.height, bandwidth: v.bandwidth, videoCodec: v.videoCodec });
       });
 
+      if (config) player.configure(config);
       if (abrOff) player.configure('abr.enabled', false);
       if (clearKey) {
         // ClearKey is the one key system every browser must support. The key is

@@ -31,6 +31,8 @@ export interface RunMetrics {
   rebufferMs: number;
   /** One entry per error event, as "source:code", e.g. "shaka:3014" or "video:3". */
   errors: string[];
+  /** Height in pixels of the first presented frame: the quality playback started at. */
+  startHeight?: number;
   /** The same things as Shaka measured them, for the cross-check. */
   shaka: ShakaCrossCheck;
 }

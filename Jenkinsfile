@@ -62,6 +62,7 @@ pipeline {
             always {
               sh 'npx tsx scripts/flake-report.ts || echo "flake report skipped"'
               sh 'npx tsx scripts/metrics-report.ts || echo "metrics report skipped"'
+              sh 'npx tsx scripts/experiment-report.ts || echo "experiment report skipped"'
               junit allowEmptyResults: true, testResults: 'results/junit.xml'
               sh 'node scripts/archive-results.mjs linux-chromium'
               archiveArtifacts allowEmptyArchive: true, artifacts: 'archive/linux-chromium/**'
@@ -92,6 +93,7 @@ pipeline {
               // control to it and never comes back to run `|| echo`.
               bat 'call npx tsx scripts/flake-report.ts || echo flake report skipped'
               bat 'call npx tsx scripts/metrics-report.ts || echo metrics report skipped'
+              bat 'call npx tsx scripts/experiment-report.ts || echo experiment report skipped'
               junit allowEmptyResults: true, testResults: 'results/junit.xml'
               bat 'node scripts/archive-results.mjs windows-edge'
               archiveArtifacts allowEmptyArchive: true, artifacts: 'archive/windows-edge/**'

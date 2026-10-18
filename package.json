@@ -20,7 +20,8 @@
     "test": "tsc && playwright test",
     "test:unit": "playwright test --project=unit",
     "test:chaos": "CHAOS=1 playwright test tests/chaos.spec.ts --repeat-each=10",
-    "report": "tsx scripts/flake-report.ts && tsx scripts/metrics-report.ts",
+    "report": "tsx scripts/flake-report.ts && tsx scripts/metrics-report.ts && tsx scripts/experiment-report.ts",
+    "experiment": "playwright test --grep @experiment --repeat-each=10 && tsx scripts/experiment-report.ts",
     "typecheck": "tsc"
   },
   "dependencies": {

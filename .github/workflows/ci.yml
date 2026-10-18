@@ -83,6 +83,10 @@ jobs:
         if: ${{ !cancelled() }}
         run: npx tsx scripts/metrics-report.ts >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Experiment report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/experiment-report.ts >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload HTML report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
