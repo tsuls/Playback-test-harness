@@ -1,8 +1,10 @@
-# Runs the whole suite on every push and pull request.
+# Runs the whole suite on every push and pull request, on two platforms:
+# Linux + Chromium (job `test`) and Windows + Edge (job `test-windows-edge`).
 #
 # GitHub Actions basics: a *workflow* (this file) has *jobs*; each job runs on a
 # fresh virtual machine (`runs-on`) and executes its *steps* in order. A step
 # either runs a shell command (`run`) or reuses a published action (`uses`).
+# Jobs run in parallel and each reports its own status check on the PR.
 
 name: CI
 
@@ -10,11 +12,13 @@ on:
   push:
   pull_request:
 
-# The job only needs to read the repository.
+# The jobs only need to read the repository.
 permissions:
   contents: read
 
 jobs:
+  # The Linux job keeps the id `test`: the merge ruleset requires a check with
+  # exactly that name, so renaming it would block every PR.
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -42,23 +46,27 @@ jobs:
       # --repeat-each=3 runs every test three times, so each CI run also produces
       # flake data. With `retries: 1` in the config, a test that fails and then
       # passes on retry is reported as flaky and does NOT fail the job; a test
-      # that fails both attempts does.
+      # that fails both attempts does. On Linux the config picks the `chromium`
+      # project (plus `unit`).
       - name: Run tests
         run: npx playwright test --repeat-each=3
 
       # The steps below run even if the tests failed (but not if the run was
-      # cancelled): failures are exactly when the reports matter most.
-      - name: Write flake and metrics reports to the job summary
+      # cancelled): failures are exactly when the reports matter most. Each
+      # report is its own step, so one failing script can't hide the other.
+      - name: Flake report → job summary
         if: ${{ !cancelled() }}
-        run: |
-          npm run report
-          cat results/flakes.md results/summary.md >> "$GITHUB_STEP_SUMMARY"
+        run: npx tsx scripts/flake-report.ts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Metrics report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/metrics-report.ts >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload HTML report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: playwright-report
+          name: playwright-report-linux-chromium
           path: playwright-report/
           retention-days: 14
 
@@ -66,6 +74,60 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: results
+          name: results-linux-chromium
+          path: results/
+          retention-days: 14
+
+  test-windows-edge:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    # Run every `run:` step with Git Bash (preinstalled on GitHub's Windows
+    # machines), so the commands are identical to the Linux job.
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # No browser download: Edge is preinstalled on GitHub's Windows machines,
+      # and the `edge` project uses it through `channel: 'msedge'`.
+
+      - name: Type check
+        run: npx tsc
+
+      # On Windows the config picks the `edge` project (plus `unit`), which also
+      # runs the Windows-only tests tagged @edge.
+      - name: Run tests
+        run: npx playwright test --repeat-each=3
+
+      - name: Flake report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/flake-report.ts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Metrics report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/metrics-report.ts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload HTML report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report-windows-edge
+          path: playwright-report/
+          retention-days: 14
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: results-windows-edge
           path: results/
           retention-days: 14
