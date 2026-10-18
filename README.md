@@ -82,16 +82,17 @@ flowchart TB
   reporters -- "results/report.json" --> metrics
 
   out --> ghsum["GitHub job summary<br/>+ artifacts"]
-  out --> jart["Jenkins build log, JUnit page<br/>+ archived artifacts"]
+  out --> jart["Jenkins build log, JUnit page<br/>+ artifacts per platform in archive/"]
   reporters -- "results/junit.xml" --> jart
 
   gate -- "status check: CI passed" --> pr{{"Pull request<br/>ruleset: both checks must pass to merge"}}
   jenkins -- "status check: jenkins/pr-head" --> pr
 ```
 
-- **Two CI systems, one test run.** GitHub Actions runs on GitHub's machines. Jenkins runs on a self-hosted VM, triggered by a GitHub webhook. Both run the same commands, so the test run in the middle is identical.
+- **Two CI systems, one test run.** GitHub Actions runs on GitHub's machines. Jenkins runs on two self-hosted VMs, triggered by a GitHub webhook: the controller and its Docker agent on a Linux VM, and a Windows agent on a Windows VM. Both CIs run the same commands, so the test run in the middle is identical.
 - **Two platforms, one test codebase.** `playwright.config.ts` picks the browser from the OS. Each CI runs the same steps on Linux and Windows in parallel and reports one overall result: GitHub Actions through a matrix job and a gate job, Jenkins through parallel stages on a Linux and a Windows agent.
 - **Only the webhook is public.** Caddy forwards just `POST /github-webhook/` to Jenkins; everything else gets a 404, and the Jenkins UI stays private. GitHub signs each delivery with a shared secret that Jenkins verifies.
+- **The controller calls out to the Windows agent, not the other way round.** Jenkins opens an SSH connection to the Windows VM with its own key, and checks the VM's pinned host key, so the Windows machine never needs to reach Jenkins. The Windows VM only has to accept SSH from the Jenkins VM.
 - **Measurements come from inside the browser.** The page records events; `src/collect.ts` reads them out and turns them into metrics, which travel through Playwright's reporters to the report scripts.
 
 ## What it measures, and how
@@ -118,7 +119,7 @@ Every run also records Shaka's view of the same playback. What we found:
 
 | Test | What it checks |
 | --- | --- |
-| Codec support | Chromium reports H.264/AAC support through `MediaSource.isTypeSupported`. |
+| Codec support | The browser reports H.264/AAC support through `MediaSource.isTypeSupported`. |
 | Clear stream | A clear DASH stream starts, plays 5 s, has a sane TTFF and no errors. |
 | ClearKey, right key | An encrypted stream decrypts through EME (`org.w3.clearkey`) and plays. |
 | ClearKey, wrong key | A negative control: with a wrong key, decoding fails. Proves the test above really depends on decryption. |
@@ -152,7 +153,7 @@ Each platform tests its own browser, and every test runs on both unless it is ta
 3. Playwright's JSON reporter writes every attempt to `results/report.json`.
 4. `scripts/flake-report.ts` reads that file and prints, per test: runs, passes, failures, flaky runs and the flake rate (flaky / runs).
 
-`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time. It only runs with `CHAOS=1`, so the report has something to catch.
+`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time, so the report has something to catch. It only runs with `CHAOS=1` (`npm run test:chaos`). Everywhere else, CI included, it is skipped: that is the "3 skipped" in every CI run (one per `--repeat-each=3` repeat). Running it in CI would make builds random: about 3% of the time (0.3 × 0.3) it would fail both attempts and turn a pull request red for no reason.
 
 ### Should a flaky test fail CI?
 
@@ -168,7 +169,7 @@ The usual compromise is to keep pull requests lenient but make flakes impossible
 
 ## Sample results
 
-From a local run with `--repeat-each=3` (test names shortened):
+From a local Linux + Chromium run with `--repeat-each=3` (test names shortened):
 
 | Test | Runs | TTFF p50 (ms) | TTFF p95 (ms) | Rebuffers | Rebuffer ms | Shaka rebuffers | Shaka rebuffer ms | Errors |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -210,7 +211,7 @@ The pipeline has `agent none` and a `Platforms` stage that runs two stages in `p
 | Browser setup | Linux: `npx playwright install --with-deps chromium`; Windows: none | Linux: already in the image; Windows: none |
 | Steps | `steps:` with `run:` (bash on both) | `sh` on Linux, `bat` on Windows |
 | Run even if tests fail | `if: ${{ !cancelled() }}` | `post { always { … } }` |
-| Flake and metrics tables | Job summary page | Build log, plus archived `results/*.md` |
+| Flake and metrics tables | Job summary page | Build log, plus archived `archive/<platform>/results/*.md` |
 | Per-test results | Inline in the logs and HTML report | JUnit page from `results/junit.xml` |
 | Artifacts | `actions/upload-artifact`, named per platform | `archiveArtifacts` of `archive/<platform>/` |
 
@@ -225,28 +226,28 @@ JUnit XML has no "flaky" status: a test that passes on retry shows up in Jenkins
 
 - **DRM:** Playwright's Chromium has no Widevine, and no CI machine here offers PlayReady (see *Platforms*), so the playback tests use clear streams plus one ClearKey stream. ClearKey exercises the same EME path without a licence server.
 - **Clear lead:** the ClearKey demo stream's first few seconds are unencrypted, so *any* key appears to work at the start. The ClearKey tests start playback at 20 s to get past it.
-- **Codecs:** Playwright's bundled Chromium supports H.264/AAC and VP9/Opus, so the `chrome` channel isn't needed. Shaka chooses VP9 for these streams, and each run records the codec actually used.
+- **Codecs:** Playwright's bundled Chromium supports H.264/AAC and VP9, so the `chrome` channel isn't needed. On both platforms Shaka chooses VP9 video with AAC audio for these streams, and each run records the codecs actually used (a `codecs` annotation).
 - **Network variance:** streams come from a public CDN, so timings vary between runs and machines. Assertions check behaviour ("a rebuffer happened and playback recovered"), not exact numbers, and use generous timeouts. With only 3 runs, p95 is effectively the slowest run.
 
 ## Project layout
 
 ```
-site/index.html            test page: Shaka Player + event recording
-src/streams.ts             stream URLs (all verified to load)
-src/types.ts               shared types
-src/collect.ts             read events/stats from the page, compute run metrics
-src/metrics.ts             percentiles
-src/flake.ts               flake classification
-src/report.ts              read Playwright's JSON report
-tests/                     playback, network, DRM capability and chaos tests
-tests/unit/                unit tests for the pure functions
-scripts/flake-report.ts    JSON report → flake table
-scripts/metrics-report.ts  JSON report → results/metrics.json + summary table
-scripts/serve.mjs          static server started by Playwright's webServer
-playwright.config.ts       projects: unit, plus chromium (Linux) or edge (Windows)
-.github/workflows/ci.yml   CI matrix (Linux + Windows) and the "CI passed" gate
-Jenkinsfile                the same pipeline for Jenkins: parallel Linux and Windows stages
+site/index.html              test page: Shaka Player + event recording
+src/streams.ts               stream URLs (all verified to load)
+src/types.ts                 shared types
+src/collect.ts               read events/stats from the page, compute run metrics
+src/metrics.ts               percentiles
+src/flake.ts                 flake classification
+src/report.ts                read Playwright's JSON report
+tests/                       playback, network, DRM capability and chaos tests
+tests/unit/                  unit tests for the pure functions
+scripts/flake-report.ts      JSON report → flake table
+scripts/metrics-report.ts    JSON report → results/metrics.json + summary table
+scripts/serve.mjs            static server started by Playwright's webServer
 scripts/archive-results.mjs  copy reports into archive/<platform>/ for Jenkins
+playwright.config.ts         projects: unit, plus chromium (Linux) or edge (Windows)
+.github/workflows/ci.yml     CI matrix (Linux + Windows) and the "CI passed" gate
+Jenkinsfile                  the same pipeline for Jenkins: parallel Linux and Windows stages
 ```
 
 ## What to add next

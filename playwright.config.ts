@@ -3,7 +3,7 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 3000;
 
 // Each platform tests its own browser: Playwright's Chromium on Linux, Microsoft
-// Edge on Windows. This matches the two CI jobs, and keeps `npm test` working on
+// Edge on Windows. This matches the two CI platforms, and keeps `npm test` working on
 // both (Linux has no Edge; the Windows job doesn't need Chromium).
 const onWindows = process.platform === 'win32';
 
