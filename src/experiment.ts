@@ -1,3 +1,5 @@
+import { percentile } from './metrics'; 
+
 // Compares the two arms of an A/B experiment on one metric.
 // Tyler implements compareArms(); tests/unit/experiment.spec.ts describes the
 // expected behaviour, and is skipped until the stub is replaced.
@@ -48,5 +50,37 @@ export function compareArms(
   treatment: readonly number[],
   rules: ComparisonRules = DEFAULT_RULES,
 ): ArmComparison {
-  throw new Error('TODO');
+
+  let result = {
+    controlP50: 0,
+    treatmentP50: 0,
+    delta: 0,
+    deltaPct: 0,
+    verdict: Verdict.Inconclusive
+  };
+
+  // is there enough runs?
+  if(control.length >= rules.minRuns && treatment.length >= rules.minRuns){
+
+    // auto rejects empty arm & does not modify inputs
+    // compute meadian metric from each arm
+    result.controlP50 = percentile(control, 50);
+    result.treatmentP50 = percentile(treatment, 50);
+    
+    // compute deltas
+    result.delta = result.treatmentP50 - result.controlP50;
+    result.deltaPct = result.delta / (result.controlP50 * 100);
+
+    // is the change big enough?
+    if(Math.abs(result.deltaPct) >= rules.minEffectPct){
+      if(result.delta < 0){
+        result.verdict = Verdict.Better;
+      }
+      else{
+        result.verdict = Verdict.Worse;
+      }
+    }
+  }
+
+  return result;
 }
