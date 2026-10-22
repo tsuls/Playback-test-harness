@@ -49,9 +49,10 @@ test('records which DRM key systems this platform offers', async ({ page }, test
   expect(offered.clearkey, 'ClearKey is required by the EME spec').toBe(true);
 });
 
-// Platform-specific: the `@edge` tag means only the Windows/Edge project runs it
-// (the chromium project excludes @edge with grepInvert in playwright.config.ts).
-test('Edge on Windows offers Widevine', { tag: '@edge' }, async ({ page }) => {
+// DEMO (dev/platform_ci_fail_demo, do not merge): the `@edge` tag is removed, so
+// the chromium project runs this test too. Linux Chromium has no Widevine, so it
+// fails on Linux on both attempts and passes on Windows: a real platform failure.
+test('Edge on Windows offers Widevine', async ({ page }) => {
   const offered = await offeredKeySystems(page);
   expect(offered.widevine, 'needs --disable-component-update removed; see playwright.config.ts').toBe(true);
 });
