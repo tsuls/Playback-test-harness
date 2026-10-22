@@ -16,6 +16,13 @@ export interface RunRecord extends TestRun {
   project: string;
   /** Metrics from the final attempt, the one that decided the outcome. */
   metrics?: RunMetrics;
+  /** The test's annotations, e.g. which experiment arm the run belongs to. */
+  annotations: { type: string; description?: string }[];
+}
+
+/** The description of a run's first annotation of this type, if any. */
+export function annotation(run: RunRecord, type: string): string | undefined {
+  return run.annotations.find((a) => a.type === type)?.description;
 }
 
 /**
@@ -51,6 +58,7 @@ export function loadRuns(path = DEFAULT_REPORT_PATH): RunRecord[] {
           metrics: attachment?.body
             ? (JSON.parse(Buffer.from(attachment.body, 'base64').toString('utf8')) as RunMetrics)
             : undefined,
+          annotations: t.annotations,
         });
       }
     }

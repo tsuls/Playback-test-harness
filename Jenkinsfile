@@ -51,7 +51,8 @@ pipeline {
             stage('Test') {
               // A flaky test (passes on retry) does not fail the build; a test
               // that fails both attempts does. Same rule as GitHub Actions.
-              steps { sh 'npx playwright test --repeat-each=3' }
+              // The experiment arms run in their own stage, with more runs.
+              steps { sh 'npx playwright test --repeat-each=3 --grep-invert @experiment' }
             }
           }
           // `post { always }` runs whether the stages passed or failed, like
@@ -83,7 +84,7 @@ pipeline {
               steps { bat 'npx tsc' }
             }
             stage('Test') {
-              steps { bat 'npx playwright test --repeat-each=3' }
+              steps { bat 'npx playwright test --repeat-each=3 --grep-invert @experiment' }
             }
           }
           post {
@@ -95,6 +96,57 @@ pipeline {
               junit allowEmptyResults: true, testResults: 'results/junit.xml'
               bat 'node scripts/archive-results.mjs windows-edge'
               archiveArtifacts allowEmptyArchive: true, artifacts: 'archive/windows-edge/**'
+            }
+          }
+        }
+
+        // The A/B experiment, 10 runs per arm, so compareArms has enough samples
+        // to call a verdict. Same as the `experiment` job in ci.yml. A stage
+        // fails only if the guardrail fails (a playback error in either arm).
+        stage('linux-chromium-experiment') {
+          agent {
+            docker {
+              image 'mcr.microsoft.com/playwright:v1.64.1-noble'
+              args '--ipc=host'
+            }
+          }
+          environment {
+            npm_config_cache = "${WORKSPACE}/.npm"
+          }
+          stages {
+            stage('Install') {
+              steps { sh 'npm ci' }
+            }
+            stage('Experiment') {
+              steps { sh 'npx playwright test --grep @experiment --repeat-each=10' }
+            }
+          }
+          post {
+            always {
+              sh 'npx tsx scripts/experiment-report.ts || echo "experiment report skipped"'
+              sh 'node scripts/archive-results.mjs linux-chromium-experiment'
+              archiveArtifacts allowEmptyArchive: true, artifacts: 'archive/linux-chromium-experiment/**'
+            }
+          }
+        }
+
+        // The Windows agent has one executor, so this stage waits for
+        // windows-edge to finish and then runs on the same machine.
+        stage('windows-edge-experiment') {
+          agent { label 'windows' }
+          stages {
+            stage('Install') {
+              steps { bat 'npm ci' }
+            }
+            stage('Experiment') {
+              steps { bat 'npx playwright test --grep @experiment --repeat-each=10' }
+            }
+          }
+          post {
+            always {
+              bat 'call npx tsx scripts/experiment-report.ts || echo experiment report skipped'
+              bat 'node scripts/archive-results.mjs windows-edge-experiment'
+              archiveArtifacts allowEmptyArchive: true, artifacts: 'archive/windows-edge-experiment/**'
             }
           }
         }

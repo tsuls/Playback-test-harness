@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { computeRebuffers, errorCodes, shakaCrossCheck, type ShakaStats } from '../../src/collect';
+import { computeRebuffers, errorCodes, shakaCrossCheck, startHeight, type ShakaStats } from '../../src/collect';
 import type { PlaybackEvent } from '../../src/types';
 
 /** Shorthand for a video-element event at time t (ms). */
@@ -39,6 +39,12 @@ test.describe('computeRebuffers', () => {
     const events = [ev('playing', 1200), ev('playing', 0), ev('waiting', 1000)];
     expect(computeRebuffers(events, 2000)).toEqual({ count: 1, totalMs: 200 });
   });
+});
+
+test('startHeight reads the first frame\'s height, if recorded', () => {
+  expect(startHeight([ev('playing', 0), { type: 'first-frame', source: 'video', t: 1, detail: { height: 144 } }])).toBe(144);
+  expect(startHeight([ev('first-frame', 1)])).toBeUndefined();
+  expect(startHeight([])).toBeUndefined();
 });
 
 test('errorCodes formats source:code', () => {

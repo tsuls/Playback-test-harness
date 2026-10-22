@@ -41,6 +41,8 @@ export interface PageOptions {
   clearKey?: string;
   /** Start position in seconds. */
   start?: number;
+  /** Extra Shaka settings, passed to player.configure() (see site/index.html). */
+  config?: Record<string, unknown>;
 }
 
 /** Path of the test page for a stream, relative to the config's baseURL. */
@@ -50,6 +52,7 @@ export function pageUrl(stream: Stream, opts: PageOptions = {}): string {
   const clearKey = opts.clearKey ?? stream.clearKey;
   if (clearKey) params.set('clearkey', clearKey);
   if (opts.start !== undefined) params.set('start', String(opts.start));
+  if (opts.config) params.set('config', JSON.stringify(opts.config));
   return `/?${params}`;
 }
 
@@ -164,6 +167,12 @@ export function computeRebuffers(
   return { count, totalMs };
 }
 
+/** Height of the first presented frame, if the page recorded it. */
+export function startHeight(events: readonly PlaybackEvent[]): number | undefined {
+  const height = events.find((e) => e.type === 'first-frame')?.detail?.height;
+  return typeof height === 'number' ? height : undefined;
+}
+
 /** Errors as "source:code", e.g. "shaka:3014". */
 export function errorCodes(events: readonly PlaybackEvent[]): string[] {
   return errorEvents(events).map((e) => `${e.source}:${String(e.detail?.code ?? 'unknown')}`);
@@ -195,6 +204,7 @@ export function computeRunMetrics(
     rebufferCount: rebuffers.count,
     rebufferMs: rebuffers.totalMs,
     errors: errorCodes(events),
+    startHeight: startHeight(events),
     shaka: shakaCrossCheck(stats),
   };
 }
@@ -225,6 +235,7 @@ export async function recordRun(page: Page): Promise<{ metrics: RunMetrics; even
         `bufferingTime ${ms(metrics.shaka.bufferingMs)} ms, stallsDetected ${metrics.shaka.stallsDetected})`,
     },
     { type: 'errors', description: metrics.errors.join(', ') || 'none' },
+    { type: 'start_height', description: `${metrics.startHeight ?? 'unknown'}p` },
     { type: 'codecs', description: `${stats.currentCodecs} @ ${stats.width}x${stats.height}` },
   );
   await info.attach(METRICS_ATTACHMENT, { body: JSON.stringify(metrics), contentType: 'application/json' });

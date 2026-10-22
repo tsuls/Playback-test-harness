@@ -68,9 +68,10 @@ jobs:
       # flake data. With `retries: 1` in the config, a test that fails and then
       # passes on retry is reported as flaky and does NOT fail the job; a test
       # that fails both attempts does. playwright.config.ts picks the browser
-      # project from the OS (chromium on Linux, edge on Windows).
+      # project from the OS (chromium on Linux, edge on Windows). The experiment
+      # arms are left out here: the `experiment` job runs them with enough runs.
       - name: Run tests
-        run: npx playwright test --repeat-each=3
+        run: npx playwright test --repeat-each=3 --grep-invert @experiment
 
       # The steps below run even if the tests failed (but not if the run was
       # cancelled): failures are exactly when the reports matter most. Each
@@ -99,15 +100,65 @@ jobs:
           path: results/
           retention-days: 14
 
-  # The single check the merge ruleset requires. Adding a platform to the matrix
+  # The A/B experiment, on both platforms, in its own job: 10 runs per arm, so
+  # compareArms has enough samples to call a verdict (it needs at least 5), and
+  # the arms don't compete for the machine with the rest of the suite.
+  # The job fails only if the guardrail fails (a playback error in either arm);
+  # a "worse" verdict is reported, not enforced.
+  experiment:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-chromium
+            os: ubuntu-latest
+          - platform: windows-edge
+            os: windows-latest
+    name: experiment (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Chromium
+        if: ${{ runner.os == 'Linux' }}
+        run: npx playwright install --with-deps chromium
+
+      - name: Run experiment
+        run: npx playwright test --grep @experiment --repeat-each=10
+
+      - name: Experiment report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/experiment-report.ts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: experiment-${{ matrix.platform }}
+          path: results/
+          retention-days: 14
+
+  # The single check the merge ruleset requires. Adding a platform or a job
   # then never means editing the ruleset.
   ci-passed:
     name: CI passed
-    needs: playback
+    needs: [playback, experiment]
     # Run even when a platform failed; otherwise this job is skipped, and GitHub
     # treats a skipped required check as passing.
     if: ${{ always() }}
     runs-on: ubuntu-latest
     steps:
-      # needs.playback.result is "success" only if every matrix entry succeeded.
-      - run: test "${{ needs.playback.result }}" = success
+      # A needed job's result is "success" only if every matrix entry succeeded.
+      - run: test "${{ needs.playback.result }}" = success && test "${{ needs.experiment.result }}" = success
