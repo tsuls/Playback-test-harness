@@ -12,7 +12,7 @@ Owner: Tyler. He will present this in a technical interview on Oct 22, so he has
 4. **Keep it small.** No frameworks beyond the stack below. Few dependencies. If you want to add a package, ask first and say why.
 5. **No employer content.** This is a personal project. No references to any employer, internal system, codename or proprietary SDK anywhere in code, comments, commit suggestions or the README.
 6. **Verify, don't assume.** Run the tests after every change. If a stream URL, API or flag doesn't behave the way you expected, say so and show the evidence. Don't paper over it.
-7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles), `src/flake.ts` (flake classification) and `compareArms` in `src/experiment.ts` (A/B comparison) are his. He has implemented the first two; don't rewrite them unless he asks. New core logic starts as a typed stub throwing `new Error('TODO')`, with unit tests that skip themselves (`isTodo`) while it is still a stub. Don't implement a stub unless he asks.
+7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles), `src/flake.ts` (flake classification) and `compareArms` in `src/experiment.ts` (A/B comparison) are his. He has implemented all three; don't rewrite them unless he asks. New core logic starts as a typed stub throwing `new Error('TODO')`, with unit tests that skip themselves (`isTodo`) while it is still a stub. Don't implement a stub unless he asks.
 
 ## Stack
 
@@ -92,12 +92,12 @@ ARCHITECTURE.md            detailed diagram, CI flow, security boundaries
 - **Cross-platform check:** anything run on Windows must not rely on POSIX shell syntax, and paths must use Node's `path` module. Known exception, documented in the README: `npm run test:chaos` uses `CHAOS=1 …`; CI never runs it.
 - **README (done):** the platform matrix, what differs per platform (DRM, codecs), the GitHub Actions and Jenkins sections, and the updated architecture diagram.
 
-**Phase 6: A/B experiment (done, except Tyler's `compareArms`).** Show experimentation on a player setting, the way a player team would evaluate an ABR change.
+**Phase 6: A/B experiment (done).** Show experimentation on a player setting, the way a player team would evaluate an ABR change.
 - **Page support:** `site/index.html` takes `&config=<JSON>` and passes it to `player.configure()`; the first-frame event records the frame's height (start quality). `RunMetrics.startHeight` carries it; `src/report.ts` exposes each run's annotations.
 - **Experiment:** `tests/experiment.spec.ts` (`@experiment`), experiment `startup-bandwidth-estimate`. Control = Shaka as shipped (in Chromium/Edge it uses `navigator.connection.downlink`, ~10 Mbit/s, so it starts at 576p). Treatment = `abr.useNetworkInformation: false` + `defaultBandwidthEstimate: 100000` (starts at 144p, switches up). Each run carries `experiment` and `arm` annotations. Guardrail assertion only: no errors.
 - **Pitfall found (verified):** changing only `defaultBandwidthEstimate` has no effect in Chromium, because Shaka prefers the Network Information estimate; both arms started at 576p.
 - **Results (verified, Linux, 3 batches × 10 runs per arm):** treatment TTFF p50 400–411 ms vs control 475–499 ms (−16 to −18%), at 144p vs 576p, no rebuffers or errors. Edge on Windows (3 runs) points the same way. An earlier 6-run probe with a different control pointed the other way: small samples mislead.
-- **Comparison:** `compareArms(control, treatment, rules)` in `src/experiment.ts` is Tyler's stub; `tests/unit/experiment.spec.ts` specifies it (p50s via `percentile`, delta and deltaPct, Inconclusive below `minRuns` 5 or `minEffectPct` 10%, exactly 10% counts). The unit tests were checked against a temporary reference implementation, then the stub was restored.
+- **Comparison:** `compareArms(control, treatment, rules)` in `src/experiment.ts` is Tyler's; `tests/unit/experiment.spec.ts` specifies it (p50s via `percentile`, delta and deltaPct, Inconclusive below `minRuns` 5 or `minEffectPct` 10%, exactly 10% counts). p50s and deltas are always reported; only the verdict depends on the rules. First full run with the verdict: control 558 ms vs treatment 446 ms, −20.2%, **better**.
 - **Reports:** `scripts/experiment-report.ts` → `results/experiment.md`, added to `npm run report`, the GitHub job summary and both Jenkins stages. `npm run experiment` = `--grep @experiment --repeat-each=10` + the report (cross-platform: no env vars).
 - **Docs:** README rewritten as a narrative that reflects what a player quality / test-infrastructure team does (quality metrics, platforms and content protection, experimentation, CI/CD and developer productivity, AI-assisted workflow), with a small diagram; the full diagram moved to `ARCHITECTURE.md`.
 

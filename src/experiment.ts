@@ -51,36 +51,25 @@ export function compareArms(
   rules: ComparisonRules = DEFAULT_RULES,
 ): ArmComparison {
 
-  let result = {
-    controlP50: 0,
-    treatmentP50: 0,
-    delta: 0,
-    deltaPct: 0,
-    verdict: Verdict.Inconclusive
-  };
+  // compute the median metric from each arm, even when there are too few runs
+  // to call a winner: the numbers are still real. percentile() rejects an
+  // empty arm with a RangeError and does not modify its input.
+  const controlP50 = percentile(control, 50);
+  const treatmentP50 = percentile(treatment, 50);
 
-  // is there enough runs?
-  if(control.length >= rules.minRuns && treatment.length >= rules.minRuns){
+  // compute deltas
+  const delta = treatmentP50 - controlP50;
+  const deltaPct = delta / controlP50 * 100;
 
-    // auto rejects empty arm & does not modify inputs
-    // compute meadian metric from each arm
-    result.controlP50 = percentile(control, 50);
-    result.treatmentP50 = percentile(treatment, 50);
-    
-    // compute deltas
-    result.delta = result.treatmentP50 - result.controlP50;
-    result.deltaPct = result.delta / (result.controlP50 * 100);
+  // only call a winner with enough runs in both arms and a big enough change
+  const enoughRuns = control.length >= rules.minRuns && treatment.length >= rules.minRuns;
+  const bigEnough = Math.abs(deltaPct) >= rules.minEffectPct;
 
-    // is the change big enough?
-    if(Math.abs(result.deltaPct) >= rules.minEffectPct){
-      if(result.delta < 0){
-        result.verdict = Verdict.Better;
-      }
-      else{
-        result.verdict = Verdict.Worse;
-      }
-    }
+  let verdict = Verdict.Inconclusive;
+  if(enoughRuns && bigEnough){
+    // lower is better, so a negative delta means the treatment improved
+    verdict = delta < 0 ? Verdict.Better : Verdict.Worse;
   }
 
-  return result;
+  return { controlP50, treatmentP50, delta, deltaPct, verdict };
 }

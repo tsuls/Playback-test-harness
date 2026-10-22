@@ -124,7 +124,7 @@ Two things the experiment taught:
 3. Playwright's JSON reporter writes every attempt to `results/report.json`.
 4. `scripts/flake-report.ts` reads that file and prints, per test: runs, passes, failures, flaky runs and the flake rate (flaky / runs).
 
-`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time, so the report has something to catch. It only runs with `CHAOS=1` (`npm run test:chaos`); everywhere else, CI included, it is skipped, which accounts for 3 skips per CI run (one per repeat). Running it in CI would make builds random: about 3% of the time (0.3 × 0.3) it would fail both attempts and turn a pull request red for no reason. The unit tests for `compareArms` also skip themselves until it is implemented.
+`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time, so the report has something to catch. It only runs with `CHAOS=1` (`npm run test:chaos`); everywhere else, CI included, it is skipped, which accounts for 3 skips per CI run (one per repeat). Running it in CI would make builds random: about 3% of the time (0.3 × 0.3) it would fail both attempts and turn a pull request red for no reason.
 
 ### Should a flaky test fail CI?
 
