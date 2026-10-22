@@ -115,7 +115,7 @@ The conservative start reaches the first frame about 16–18% sooner in every ba
 Two things the experiment taught:
 
 - **A setting can be silently ignored.** The first attempt changed only `defaultBandwidthEstimate`, and both arms started at 576p. Shaka uses the browser's Network Information estimate whenever it is available, so the setting had no effect until `useNetworkInformation` was turned off as well. Without checking the start height, the experiment would have reported "no difference" for a change that never happened.
-- **Small samples mislead.** An early probe of 6 runs per arm, with a slightly different control, pointed the *other* way. That is why the verdict needs a minimum number of runs, and why CI's 3 runs per arm are only ever reported as data, not as a decision. `npm run experiment` runs 10 per arm. A production experiment would also randomise the order of runs, use far more samples on real user traffic, and test for significance rather than use a fixed threshold.
+- **Small samples mislead.** An early probe of 6 runs per arm, with a slightly different control, pointed the *other* way. That is why the verdict needs a minimum number of runs. Both CI systems run the experiment in its own job with 10 runs per arm, as `npm run experiment` does locally, so every pull request gets a real verdict for each platform. A production experiment would also randomise the order of runs, use far more samples on real user traffic, and test for significance rather than use a fixed threshold.
 
 ## Flaky tests
 
@@ -154,7 +154,7 @@ And the chaos demo, 10 runs:
 | --- | --- | --- | --- | --- | --- |
 | DEMO: fails randomly about 30% of the time | 10 | 6 | 1 | 3 | 30% |
 
-CI writes the flake, metrics and experiment tables to each platform's summary page, so a developer sees them on the pull request without digging through logs, and uploads the HTML report and `results/` as artifacts (`playwright-report-<platform>`, `results-<platform>`).
+CI writes the flake and metrics tables to each platform's summary page, and the experiment table to the experiment job's, so a developer sees them on the pull request without digging through logs, and uploads the HTML report and `results/` as artifacts (`playwright-report-<platform>`, `results-<platform>`).
 
 ## CI/CD
 
@@ -162,10 +162,11 @@ Every pull request runs the full suite on both platforms in two CI systems, and 
 
 ### GitHub Actions
 
-[`ci.yml`](.github/workflows/ci.yml) has two jobs:
+[`ci.yml`](.github/workflows/ci.yml) has three jobs:
 
-- **`playback`**, a *matrix* job: one definition, run in parallel on `linux-chromium` (`ubuntu-latest`) and `windows-edge` (`windows-latest`). `fail-fast: false` lets every platform finish and report even if another fails.
-- **`CI passed`**, a gate job that `needs` the matrix and succeeds only if every platform did. It is the one check the merge ruleset requires, so adding a platform never means editing the ruleset. It runs with `if: always()`: otherwise a platform failure would *skip* the gate, and GitHub treats a skipped required check as passing.
+- **`playback`**, a *matrix* job: one definition, run in parallel on `linux-chromium` (`ubuntu-latest`) and `windows-edge` (`windows-latest`). `fail-fast: false` lets every platform finish and report even if another fails. It runs everything except the experiment arms.
+- **`experiment`**, the same matrix running only the A/B experiment, 10 runs per arm. In its own job the arms get enough samples for a verdict and don't compete for the machine with the rest of the suite. It fails only if the guardrail fails (a playback error); a *worse* verdict is reported, not enforced.
+- **`CI passed`**, a gate job that `needs` both and succeeds only if every job on every platform did. It is the one check the merge ruleset requires, so adding a platform never means editing the ruleset. It runs with `if: always()`: otherwise a platform failure would *skip* the gate, and GitHub treats a skipped required check as passing.
 
 It runs on pull requests, and on pushes to `main` only. Running on every push as well would report each job twice per PR.
 
@@ -173,15 +174,17 @@ It runs on pull requests, and on pushes to `main` only. Running on every push as
 
 The same pipeline is defined for Jenkins in [`Jenkinsfile`](Jenkinsfile), as it would be for a team running its own CI and device lab. A Multibranch Pipeline job builds every branch and pull request, triggered by the GitHub webhook, and reports one status check back to the PR.
 
-The pipeline has `agent none` and a `Platforms` stage that runs two stages in `parallel`, with `failFast false`, so one platform failing doesn't abort the other:
+The pipeline has `agent none` and a `Platforms` stage that runs its stages in `parallel`, with `failFast false`, so one platform failing doesn't abort the other:
 
 - **`linux-chromium`** runs inside Microsoft's Playwright Docker image, which already includes Chromium and its Linux libraries. It needs the Docker Pipeline plugin and Docker on the agent.
 - **`windows-edge`** runs on any agent labelled `windows`, directly on the machine with `bat` steps (no Docker). The agent needs Java, Node 22, Git and Edge. The Jenkins controller connects to it over SSH (SSH Build Agents plugin), so the Windows machine never has to reach Jenkins and the Jenkins UI stays private.
+- **`linux-chromium-experiment`** and **`windows-edge-experiment`** run the A/B experiment with 10 runs per arm, like the `experiment` job in GitHub Actions. The Windows agent has one executor, so its experiment stage waits for `windows-edge` and then runs on the same machine.
 
 | | GitHub Actions (`ci.yml`) | Jenkins (`Jenkinsfile`) |
 | --- | --- | --- |
 | Where it runs | GitHub's Ubuntu and Windows machines | Your agents: Docker on Linux, a self-hosted Windows VM |
 | Two platforms | A matrix job | Parallel stages, each with its own `agent` |
+| Experiment | Its own matrix job | Its own stage per platform |
 | One overall result | Gate job `CI passed` | The pipeline's own status |
 | Browser setup | Linux: `npx playwright install --with-deps chromium`; Windows: none | Linux: already in the image; Windows: none |
 | Steps | `steps:` with `run:` (bash on both) | `sh` on Linux, `bat` on Windows |

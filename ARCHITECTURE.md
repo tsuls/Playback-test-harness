@@ -8,23 +8,23 @@ flowchart TB
 
   gh -- "workflow trigger" --> gha
 
-  subgraph gha ["GitHub Actions: matrix job, one run per platform"]
+  subgraph gha ["GitHub Actions: playback + experiment matrix jobs, one run per platform"]
     linux["linux-chromium<br/>ubuntu-latest"]
     win["windows-edge<br/>windows-latest"]
   end
-  gha --> gate["Gate job: CI passed<br/>success only if every platform passed"]
+  gha --> gate["Gate job: CI passed<br/>success only if every job passed"]
 
   gh -- "signed webhook" --> caddy
 
   subgraph vm ["Self-hosted Linux VM"]
     caddy["Caddy reverse proxy<br/>exposes only POST /github-webhook/"] --> jenkins["Jenkins<br/>Multibranch Pipeline"]
-    jenkins -- "stage linux-chromium" --> agent["Docker agent<br/>Playwright image"]
+    jenkins -- "stages linux-chromium<br/>+ experiment" --> agent["Docker agent<br/>Playwright image"]
   end
 
   subgraph winvm ["Self-hosted Windows VM"]
     winagent["Jenkins agent windows-edge<br/>label: windows, Edge installed"]
   end
-  jenkins -- "stage windows-edge<br/>(controller connects over SSH)" --> winagent
+  jenkins -- "stages windows-edge + experiment<br/>(controller connects over SSH)" --> winagent
 
   linux --> runner
   win --> runner
@@ -34,7 +34,7 @@ flowchart TB
   cdn[("Shaka demo streams on a public CDN<br/>clear + ClearKey DASH")]
 
   subgraph run ["Test run, same on every platform and CI"]
-    runner["Playwright Test<br/>retries: 1, --repeat-each=3<br/>project: chromium (Linux) / edge (Windows)"]
+    runner["Playwright Test<br/>retries: 1; suite --repeat-each=3,<br/>experiment --repeat-each=10<br/>project: chromium (Linux) / edge (Windows)"]
     server["scripts/serve.mjs<br/>(webServer)"]
     subgraph chromium ["Browser: Chromium or Edge"]
       page["site/index.html<br/>Shaka Player, optional config per experiment arm"]
@@ -77,7 +77,8 @@ flowchart TB
 ## How a change reaches `main`
 
 - **Two CI systems, one test run.** GitHub Actions runs on GitHub's machines. Jenkins runs on two self-hosted VMs, triggered by a GitHub webhook: the controller and its Docker agent on a Linux VM, and a Windows agent on a Windows VM. Both CIs run the same commands, so the test run in the middle is identical.
-- **Two platforms, one test codebase.** `playwright.config.ts` picks the browser from the OS. Each CI runs the same steps on Linux and Windows in parallel and reports one overall result: GitHub Actions through a matrix job and a gate job, Jenkins through parallel stages on a Linux and a Windows agent.
+- **Two platforms, one test codebase.** `playwright.config.ts` picks the browser from the OS. Each CI runs the same steps on Linux and Windows in parallel and reports one overall result: GitHub Actions through matrix jobs and a gate job, Jenkins through parallel stages on a Linux and a Windows agent.
+- **The experiment runs separately from the suite.** The suite leaves out the `@experiment` tests; a separate job (GitHub) or stage (Jenkins) per platform runs them 10 times per arm, enough for `compareArms` to call a verdict. Only the guardrail (no playback errors) can fail it.
 - **Two required checks.** The merge ruleset requires `CI passed` from GitHub Actions and `continuous-integration/jenkins/pr-head` from Jenkins. Both are reported on every commit of every pull request. That is the rule for a required check: one that only sometimes reports blocks merging forever. Jenkins' `branch` status is deliberately *not* required, because Jenkins skips branch builds once a branch has an open PR.
 
 ## Inside a test run
