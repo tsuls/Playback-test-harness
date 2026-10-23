@@ -58,6 +58,14 @@ test.describe('compareArms', () => {
     expect(t).toEqual([3, 1, 2, 5, 4]);
   });
 
+  test('a 0 ms control p50 has no baseline, so it is inconclusive', () => {
+    // Without the guard, 100 / 0 = Infinity would pass the threshold and say "worse".
+    const result = compareArms([0, 0, 0, 0, 0], [100, 100, 100, 100, 100]);
+    expect(result.deltaPct).toBeNaN();
+    expect(result.verdict).toBe(Verdict.Inconclusive);
+    expect(compareArms([0, 0, 0, 0, 0], [0, 0, 0, 0, 0]).verdict).toBe(Verdict.Inconclusive);
+  });
+
   test('rejects an empty arm', () => {
     expect(() => compareArms([], control)).toThrow(RangeError);
     expect(() => compareArms(control, [])).toThrow(RangeError);

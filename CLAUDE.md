@@ -2,7 +2,7 @@
 
 A small, public TypeScript project that runs automated video playback tests in a real browser, measures playback quality, detects flaky tests, and runs in CI on every push. It is a miniature of what a player test-automation team does.
 
-Owner: Tyler. He will present this in a technical interview on Oct 22, so he has to be able to explain every line. Clarity beats cleverness everywhere.
+Owner: Tyler. He has to be able to explain every line. Clarity beats cleverness everywhere.
 
 ## Hard rules
 
@@ -31,7 +31,7 @@ Owner: Tyler. He will present this in a technical interview on Oct 22, so he has
    - **Time to first frame (TTFF):** from `player.load()` start to the first rendered frame
    - **Rebuffer count and total rebuffer time:** each `waiting` after the first `playing`, until the next `playing`
    - **Playback errors:** count and codes
-   - Cross-check your rebuffer numbers against Shaka's `getStats()` (`bufferingTime`, `stallsDetected`) and note any disagreement. Disagreements are interesting interview material, not something to hide.
+   - Cross-check your rebuffer numbers against Shaka's `getStats()` (`bufferingTime`, `stallsDetected`) and note any disagreement. Disagreements are interesting findings, not something to hide.
 4. **Network throttling test:** open a CDP session (`page.context().newCDPSession(page)`) and call `Network.emulateNetworkConditions` to drop bandwidth sharply mid-playback. Note that ABR will simply switch down instead of stalling, so for the stall test, pin the highest variant (`abr.enabled = false`) so a rebuffer really happens. Assert that rebuffering is detected and recovered from.
 5. **Flake detection:** run with `--repeat-each` and `retries: 1`. A test that fails and then passes on retry is marked `flaky` by Playwright. Use the JSON reporter, and have `scripts/flake-report.ts` read the JSON and print per test: runs, passes, failures, flaky count, flake rate. It calls Tyler's `src/flake.ts`.
 6. **Deliberate flaky test:** one test, enabled only when `CHAOS=1`, that fails randomly about 30% of the time, so the flake report has something to catch. Label it clearly as a demonstration.
@@ -102,13 +102,10 @@ ARCHITECTURE.md            detailed diagram, CI flow, security boundaries
 - **Reports:** `scripts/experiment-report.ts` → `results/experiment.md`, added to `npm run report`, the experiment job's summary and the Jenkins experiment stages. `npm run experiment` = `--grep @experiment --repeat-each=10` + the report (cross-platform: no env vars).
 - **Docs:** README rewritten as a narrative that reflects what a player quality / test-infrastructure team does (quality metrics, platforms and content protection, experimentation, CI/CD and developer productivity, AI-assisted workflow), with a small diagram; the full diagram moved to `ARCHITECTURE.md`.
 
-## Infrastructure (outside the repo)
+## Infrastructure
 
-- Jenkins runs as a Docker container on Tyler's Linux VM, built from `~/jenkins-local/Dockerfile` (official LTS image + Docker CLI + plugins), bound to `127.0.0.1:8080` only. It uses the host's Docker socket to start build containers.
-- Caddy on the same VM exposes only `POST /github-webhook/` over HTTPS and returns 404 for everything else. GitHub signs webhook deliveries with a shared secret that Jenkins verifies. Never expose the Jenkins UI publicly: it has root-equivalent access to the VM through the Docker socket.
-- Windows agent: node `windows-edge` (label `windows`, 1 executor, workspace `C:\jenkins`, usage mode *exclusive*: only stages that ask for the `windows` label run there, so an unlabelled Docker stage can't land on it) on Tyler's Lightsail Windows Server VM. The controller launches it over SSH (SSH Build Agents plugin) as `Administrator`, with its own ed25519 key stored as the SYSTEM-scoped credential `windows-agent-ssh` and a manually pinned host key. `javaPath` is plain `java` (on the machine PATH), because the launcher doesn't quote paths with spaces. The Lightsail firewall should allow port 22 only from the Linux VM. Keep the VM's IP out of the repo.
-- Tyler reaches the Jenkins UI through an SSH tunnel from his iPad (Blink). Build logs can be read on the VM under `/var/jenkins_home/jobs/` inside the `jenkins` container.
+The self-hosted CI machines are documented outside this public repo, in Tyler's private notes on the Linux VM. Never put server addresses, account names, credentials or firewall details in the repo.
 
-## Interview framing
+## Design framing
 
 When a design choice comes up, prefer the option that's easy to explain in one sentence. Tyler should be able to answer "why did you do it this way?" for every file.

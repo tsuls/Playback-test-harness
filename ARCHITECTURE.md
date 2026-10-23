@@ -89,6 +89,6 @@ flowchart TB
 
 ## Security boundaries
 
-- **Only the webhook is public.** Caddy forwards just `POST /github-webhook/` to Jenkins; everything else gets a 404, and the Jenkins UI stays private (it has root-equivalent access to its VM through the Docker socket). GitHub signs each delivery with a shared secret that Jenkins verifies.
+- **Only the webhook is public.** Caddy forwards just `POST /github-webhook/` to Jenkins; everything else gets a 404, and the Jenkins UI stays private. GitHub signs each delivery with a shared secret that Jenkins verifies.
 - **The controller calls out to the Windows agent, not the other way round.** Jenkins opens an SSH connection to the Windows VM with its own key, stored as a credential only Jenkins itself can use, and checks the VM's pinned host key. The Windows machine never needs to reach Jenkins; it only has to accept SSH from the Jenkins VM.
 - **Pull requests from forks are not built** on Jenkins, so untrusted code never runs on the self-hosted machines.

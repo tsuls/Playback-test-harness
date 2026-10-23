@@ -110,7 +110,7 @@ Results from three batches of 10 runs per arm (Linux + Chromium):
 | control | 475–499 | 576p | 0 | none |
 | treatment | 400–411 | 144p | 0 | none |
 
-The conservative start reaches the first frame about 16–18% sooner in every batch, but starts at a quarter of the resolution. That is the real decision behind the setting: a faster start versus a sharper first few seconds. Neither arm rebuffered, so the guardrail held. Edge on Windows points the same way.
+The conservative start reaches the first frame about 16–18% sooner in every batch, but starts at a quarter of the height (144p vs 576p, a sixteenth of the pixels). That is the real decision behind the setting: a faster start versus a sharper first few seconds. Neither arm rebuffered, so the guardrail held. Edge on Windows points the same way.
 
 Two things the experiment taught:
 

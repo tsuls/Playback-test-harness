@@ -11,43 +11,43 @@ import type { FlakeSummary, TestRun } from './types';
  * - 'skipped' every attempt was skipped
  */
 export function classifyRun(attempts: readonly AttemptStatus[]): RunOutcome {
-   let countPasses = 0;
-   let countSkips = 0;
+  let countPasses = 0;
+  let countSkips = 0;
 
-   for(let i = 0; i < attempts.length; i++){
-      // Is this attempt a pass?
-      if(attempts[i] === AttemptStatus.Passed){
-        // it is a pass.
-        //first element check
-        if(i === 0){
-          //if the first attempt passed, then return
-          return RunOutcome.Pass;
-        }
-        else{
-          // otherwise, mark a pass;
-          countPasses++;
-        }
+  for(let i = 0; i < attempts.length; i++){
+    // Is this attempt a pass?
+    if(attempts[i] === AttemptStatus.Passed){
+      // it is a pass.
+      //first element check
+      if(i === 0){
+        //if the first attempt passed, then return
+        return RunOutcome.Pass;
       }
-
-      // Then, skips
-      if(attempts[i] === AttemptStatus.Skipped){
-        countSkips++;
+      else{
+        // otherwise, mark a pass;
+        countPasses++;
       }
     }
 
-    // If every attempt is a skip
-    if(countSkips === attempts.length){
-      return RunOutcome.Skipped;
+    // Then, skips
+    if(attempts[i] === AttemptStatus.Skipped){
+      countSkips++;
     }
+  }
 
-    // if no attempt passed, it's a fail. Failed, timedOut and interrupted all
-    // count as "did not pass", so there is no need to count them separately.
-    if(countPasses === 0){
-      return RunOutcome.Fail;
-    }
+  // If every attempt is a skip
+  if(countSkips === attempts.length){
+    return RunOutcome.Skipped;
+  }
 
-    //Otherwise, a later attempt passed after an earlier one did not: it's flaky.
-    return RunOutcome.Flaky;
+  // if no attempt passed, it's a fail. Failed, timedOut and interrupted all
+  // count as "did not pass", so there is no need to count them separately.
+  if(countPasses === 0){
+    return RunOutcome.Fail;
+  }
+
+  //Otherwise, a later attempt passed after an earlier one did not: it's flaky.
+  return RunOutcome.Flaky;
 }
 
 /**

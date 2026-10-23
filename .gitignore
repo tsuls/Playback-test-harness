@@ -5,3 +5,5 @@ blob-report/
 results/
 .npm/
 archive/
+# macOS Finder metadata
+.DS_Store
