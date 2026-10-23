@@ -103,5 +103,13 @@ export interface Guardrail {
  * - The guardrails array is not modified.
  */
 export function decide(verdict: Verdict, guardrails: readonly Guardrail[]): Verdict {
-  throw new Error('TODO');
+  // Guardrails only matter when the main metric improved: a loss or a
+  // non-result stays what it is.
+  if(verdict !== Verdict.Better){
+    return verdict;
+  }
+
+  // every() is true for an empty list, so no guardrails counts as all passed.
+  const allPassed = guardrails.every((g) => g.passed);
+  return allPassed ? Verdict.Better : Verdict.TradeOff;
 }
