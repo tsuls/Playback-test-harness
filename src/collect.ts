@@ -18,6 +18,10 @@ export interface ShakaStats {
   timeToFirstFrame: number;
   loadLatency: number;
   bufferingTime: number;
+  /** Time spent on licence requests. NaN when no DRM is in use. */
+  licenseTime: number;
+  /** Time to fetch the first key and load it into the DRM module. NaN without DRM. */
+  drmTimeSeconds: number;
   stallsDetected: number;
   stateHistory: ShakaStateChange[];
   currentCodecs: string;
@@ -179,6 +183,9 @@ export function errorCodes(events: readonly PlaybackEvent[]): string[] {
   return errorEvents(events).map((e) => `${e.source}:${String(e.detail?.code ?? 'unknown')}`);
 }
 
+/** Seconds to milliseconds; Shaka reports NaN for "not applicable" (e.g. no DRM). */
+const msOrUndefined = (seconds: number) => (Number.isFinite(seconds) ? seconds * 1000 : undefined);
+
 /** Shaka's numbers for the same run, rebuilt to match our definitions where possible. */
 export function shakaCrossCheck(stats: ShakaStats): ShakaCrossCheck {
   const firstPlaying = stats.stateHistory.findIndex((s) => s.state === 'playing');
@@ -191,6 +198,8 @@ export function shakaCrossCheck(stats: ShakaStats): ShakaCrossCheck {
     rebufferMs: rebuffers.reduce((sum, s) => sum + s.duration, 0) * 1000,
     bufferingMs: stats.bufferingTime * 1000,
     stallsDetected: stats.stallsDetected,
+    licenseMs: msOrUndefined(stats.licenseTime),
+    drmMs: msOrUndefined(stats.drmTimeSeconds),
   };
 }
 
@@ -235,6 +244,10 @@ export async function recordRun(page: Page): Promise<{ metrics: RunMetrics; even
         `(shaka ${metrics.shaka.rebufferCount} / ${ms(metrics.shaka.rebufferMs)} ms, ` +
         `bufferingTime ${ms(metrics.shaka.bufferingMs)} ms, stallsDetected ${metrics.shaka.stallsDetected})`,
     },
+    ...(metrics.shaka.licenseMs === undefined ? [] : [{
+      type: 'drm_timing',
+      description: `licence ${ms(metrics.shaka.licenseMs)} ms, first key loaded ${ms(metrics.shaka.drmMs ?? NaN)} ms`,
+    }]),
     { type: 'errors', description: metrics.errors.join(', ') || 'none' },
     { type: 'start_height', description: `${metrics.startHeight ?? 'unknown'}p` },
     { type: 'codecs', description: `${stats.currentCodecs} @ ${stats.width}x${stats.height}` },

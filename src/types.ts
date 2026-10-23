@@ -46,6 +46,8 @@ export interface RunMetrics {
  * - `bufferingMs` is Shaka's own `bufferingTime`, which also counts startup buffering.
  * - `stallsDetected` counts Shaka's stall detector firing, which is for a playhead
  *   stuck *with* data buffered, not for an empty buffer.
+ * - `licenseMs` (licence requests) and `drmMs` (first key fetched and loaded into
+ *   the DRM module) are only set for DRM-protected streams.
  */
 export interface ShakaCrossCheck {
   ttffMs: number;
@@ -53,6 +55,8 @@ export interface ShakaCrossCheck {
   rebufferMs: number;
   bufferingMs: number;
   stallsDetected: number;
+  licenseMs?: number;
+  drmMs?: number;
 }
 
 /**

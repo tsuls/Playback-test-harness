@@ -6,7 +6,7 @@
 // and prints the table.
 
 import { writeFileSync } from 'node:fs';
-import { summarize } from '../src/metrics';
+import { percentile, summarize } from '../src/metrics';
 import { DEFAULT_REPORT_PATH, loadRuns, markdownTable, type RunRecord } from '../src/report';
 
 const runs = loadRuns(process.argv[2] ?? DEFAULT_REPORT_PATH).filter((r) => r.metrics);
@@ -16,6 +16,7 @@ const byTitle = new Map<string, RunRecord[]>();
 for (const run of runs) byTitle.set(run.title, [...(byTitle.get(run.title) ?? []), run]);
 
 const sum = (values: number[]) => values.reduce((a, b) => a + b, 0);
+const p50OrUndefined = (values: number[]) => (values.length > 0 ? percentile(values, 50) : undefined);
 
 const tests = [...byTitle.entries()]
   .sort(([a], [b]) => a.localeCompare(b))
@@ -38,6 +39,9 @@ const tests = [...byTitle.entries()]
         bufferingMs: sum(m.map((x) => x.shaka.bufferingMs)),
         stallsDetected: sum(m.map((x) => x.shaka.stallsDetected)),
       },
+      // DRM start-up cost, for protected streams only: where TTFF goes.
+      licenseMs: p50OrUndefined(m.flatMap((x) => (x.shaka.licenseMs === undefined ? [] : [x.shaka.licenseMs]))),
+      drmMs: p50OrUndefined(m.flatMap((x) => (x.shaka.drmMs === undefined ? [] : [x.shaka.drmMs]))),
       errors: [...new Set(m.flatMap((x) => x.errors))],
     };
   });
@@ -46,7 +50,7 @@ writeFileSync('results/metrics.json', JSON.stringify({ generatedAt: new Date().t
 
 const ms = (n: number) => n.toFixed(0);
 const table = markdownTable(
-  ['Test', 'Runs', 'TTFF p50 (ms)', 'TTFF p95 (ms)', 'Rebuffers', 'Rebuffer ms', 'Shaka rebuffers', 'Shaka rebuffer ms', 'Errors'],
+  ['Test', 'Runs', 'TTFF p50 (ms)', 'TTFF p95 (ms)', 'Rebuffers', 'Rebuffer ms', 'Shaka rebuffers', 'Shaka rebuffer ms', 'License p50 (ms)', 'DRM key p50 (ms)', 'Errors'],
   tests.map((t) => [
     t.title,
     t.runs,
@@ -56,6 +60,8 @@ const table = markdownTable(
     ms(t.rebuffers.totalMs),
     t.shakaRebuffers.count,
     ms(t.shakaRebuffers.totalMs),
+    t.licenseMs === undefined ? '–' : ms(t.licenseMs),
+    t.drmMs === undefined ? '–' : ms(t.drmMs),
     t.errors.join(', ') || 'none',
   ]),
 );
