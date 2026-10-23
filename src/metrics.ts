@@ -9,7 +9,7 @@
 export function percentile(values: readonly number[], p: number): number {
 
   //throws a RangeError if values is empty or p is out of range.
-  if(values.length == 0){
+  if(values.length === 0){
     throw new RangeError('Values is empty');
   }
 
@@ -26,7 +26,7 @@ export function percentile(values: readonly number[], p: number): number {
 
   // the edge case of p = 0, return index 0, or the min value.
   // rank is 1-based, and index is 0-based. so p of 0 converted is index[-1]. clamp to index[0] 
-  if (p == 0){
+  if (p === 0){
     return valuesCopy[0];
   }
 

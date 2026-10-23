@@ -1,8 +1,7 @@
-import { percentile } from './metrics'; 
+import { percentile } from './metrics';
 
 // Compares the two arms of an A/B experiment on one metric.
-// Tyler implements compareArms(); tests/unit/experiment.spec.ts describes the
-// expected behaviour, and is skipped until the stub is replaced.
+// tests/unit/experiment.spec.ts describes the expected behaviour.
 
 /** What the comparison concludes about the treatment arm. */
 export enum Verdict {
@@ -28,7 +27,7 @@ export interface ArmComparison {
   treatmentP50: number;
   /** treatmentP50 - controlP50. Negative means the treatment is lower. */
   delta: number;
-  /** delta as a percentage of controlP50, e.g. -12.5. */
+  /** delta as a percentage of controlP50, e.g. -12.5. NaN when controlP50 is 0. */
   deltaPct: number;
   verdict: Verdict;
 }
@@ -42,6 +41,8 @@ export interface ArmComparison {
  * - Verdict is Inconclusive if either arm has fewer than `rules.minRuns` values,
  *   or if |deltaPct| is less than `rules.minEffectPct`. A change of exactly
  *   `minEffectPct` counts. Otherwise Better when delta < 0, Worse when delta > 0.
+ * - If controlP50 is 0 there is no baseline to take a percentage of: deltaPct is
+ *   NaN and the verdict is Inconclusive.
  * - Neither input array is modified.
  * - Throws a RangeError if either arm is empty.
  */
@@ -57,16 +58,18 @@ export function compareArms(
   const controlP50 = percentile(control, 50);
   const treatmentP50 = percentile(treatment, 50);
 
-  // compute deltas
+  // compute deltas. A percentage of 0 is undefined (x / 0 is Infinity or NaN),
+  // so with a 0 ms control there is no baseline and no winner can be called.
   const delta = treatmentP50 - controlP50;
-  const deltaPct = delta / controlP50 * 100;
+  const hasBaseline = controlP50 > 0;
+  const deltaPct = hasBaseline ? delta / controlP50 * 100 : NaN;
 
   // only call a winner with enough runs in both arms and a big enough change
   const enoughRuns = control.length >= rules.minRuns && treatment.length >= rules.minRuns;
   const bigEnough = Math.abs(deltaPct) >= rules.minEffectPct;
 
   let verdict = Verdict.Inconclusive;
-  if(enoughRuns && bigEnough){
+  if(hasBaseline && enoughRuns && bigEnough){
     // lower is better, so a negative delta means the treatment improved
     verdict = delta < 0 ? Verdict.Better : Verdict.Worse;
   }
