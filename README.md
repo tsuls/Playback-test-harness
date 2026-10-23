@@ -252,9 +252,11 @@ ARCHITECTURE.md              detailed architecture diagram and security boundari
 
 ## What to add next
 
+- **A regression gate against a baseline:** save `metrics.json` from every `main` run as an artifact. On a pull request, compare the new numbers with that baseline, reusing `compareArms` with `main` as the control, and warn or fail when TTFF p95 or rebuffer time gets meaningfully worse, or a test's flake rate rises. One feature turns the metrics into monitoring, a list of regressions worth fixing, and a release gate.
+- **Fault injection on segment requests:** use Playwright's `page.route` to answer a fraction of segment requests with 404s, 500s or slow responses, and assert that Shaka retries and recovers without a fatal error. It tests the client–server side of playback that a clean network never exercises.
+- **A small release workflow:** pushing a version tag creates a GitHub Release with generated notes, but only if `CI passed` is green on that commit, so a release can never ship a build that failed its checks.
 - **Real TVs and streaming devices:** drive the same test page on living-room hardware, where decoders, memory, hardware DRM and network stacks differ most from a desktop browser.
 - **A wider device matrix:** add Firefox, WebKit and macOS alongside Linux Chromium and Windows Edge.
 - **PlayReady on real hardware:** run the Edge project on a Windows machine with a GPU, where Edge can offer PlayReady, and play a PlayReady-protected stream.
-- **Regression alerts against a baseline:** store each `main` run's `metrics.json`, and flag a pull request when TTFF p95 or rebuffer time gets meaningfully worse than the baseline, or when a test's flake rate rises. This turns the metrics into a release gate.
 - **A nightly strict run:** a scheduled CI run on `main` with Playwright's `--fail-on-flaky-tests`, so any flake turns the nightly build red and gets fixed the next day, while pull requests stay lenient.
 - **Experiments under realistic networks:** run the experiment arms under throttled and variable bandwidth, where the start-quality trade-off matters most, with randomised run order and a significance test instead of a fixed threshold.
