@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { compareArms, DEFAULT_RULES, Verdict } from '../../src/experiment';
+import { compareArms, decide, DEFAULT_RULES, Verdict, type Guardrail } from '../../src/experiment';
 import { isTodo } from './todo';
 
 test.describe('compareArms', () => {
@@ -69,5 +69,39 @@ test.describe('compareArms', () => {
   test('rejects an empty arm', () => {
     expect(() => compareArms([], control)).toThrow(RangeError);
     expect(() => compareArms(control, [])).toThrow(RangeError);
+  });
+});
+
+test.describe('decide', () => {
+  test.skip(isTodo(() => decide(Verdict.Better, [])), 'src/experiment.ts decide() not implemented yet');
+
+  const pass: Guardrail = { name: 'start height', passed: true, detail: '576p → 576p' };
+  const fail: Guardrail = { name: 'start height', passed: false, detail: '576p → 144p' };
+  const otherPass: Guardrail = { name: 'rebuffers', passed: true, detail: '0 → 0' };
+
+  test('better with every guardrail passing is better', () => {
+    expect(decide(Verdict.Better, [pass, otherPass])).toBe(Verdict.Better);
+  });
+
+  test('better with no guardrails is better', () => {
+    expect(decide(Verdict.Better, [])).toBe(Verdict.Better);
+  });
+
+  test('better with any guardrail failing is a trade-off', () => {
+    expect(decide(Verdict.Better, [fail])).toBe(Verdict.TradeOff);
+    expect(decide(Verdict.Better, [otherPass, fail])).toBe(Verdict.TradeOff);
+  });
+
+  test('worse and inconclusive are kept, whatever the guardrails say', () => {
+    expect(decide(Verdict.Worse, [pass])).toBe(Verdict.Worse);
+    expect(decide(Verdict.Worse, [fail])).toBe(Verdict.Worse);
+    expect(decide(Verdict.Inconclusive, [pass])).toBe(Verdict.Inconclusive);
+    expect(decide(Verdict.Inconclusive, [fail])).toBe(Verdict.Inconclusive);
+  });
+
+  test('does not modify the guardrails', () => {
+    const guardrails = [fail, pass];
+    decide(Verdict.Better, guardrails);
+    expect(guardrails).toEqual([fail, pass]);
   });
 });

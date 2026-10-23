@@ -12,7 +12,7 @@ Owner: Tyler. He has to be able to explain every line. Clarity beats cleverness 
 4. **Keep it small.** No frameworks beyond the stack below. Few dependencies. If you want to add a package, ask first and say why.
 5. **No employer content.** This is a personal project. No references to any employer, internal system, codename or proprietary SDK anywhere in code, comments, commit suggestions or the README.
 6. **Verify, don't assume.** Run the tests after every change. If a stream URL, API or flag doesn't behave the way you expected, say so and show the evidence. Don't paper over it.
-7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles), `src/flake.ts` (flake classification) and `compareArms` in `src/experiment.ts` (A/B comparison) are his. He has implemented all three; don't rewrite them unless he asks. New core logic starts as a typed stub throwing `new Error('TODO')`, with unit tests that skip themselves (`isTodo`) while it is still a stub. Don't implement a stub unless he asks.
+7. **Leave the core logic to Tyler.** `src/metrics.ts` (percentiles), `src/flake.ts` (flake classification), and `compareArms` and `decide` in `src/experiment.ts` (A/B comparison and decision) are his. All four are implemented; don't rewrite them unless he asks. New core logic starts as a typed stub throwing `new Error('TODO')`, with unit tests that skip themselves (`isTodo`) while it is still a stub. Don't implement a stub unless he asks.
 
 ## Stack
 
@@ -53,13 +53,13 @@ src/streams.ts             stream URLs
 src/types.ts               PlaybackEvent, RunMetrics, TestResult types
 src/metrics.ts             percentiles (Tyler)
 src/flake.ts               flake classification (Tyler)
-src/experiment.ts          compareArms: A/B verdict (Tyler)
+src/experiment.ts          compareArms + decide: A/B verdict and decision (Tyler)
 src/collect.ts             read events from the page, compute run metrics
 tests/playback.spec.ts     startup, steady playback, ClearKey
 tests/network.spec.ts      throttled stall and recovery
 tests/chaos.spec.ts        demo flaky test (CHAOS=1)
 tests/experiment.spec.ts   A/B experiment arms (@experiment)
-tests/drm-capabilities.spec.ts  key systems per platform; @edge Widevine test
+tests/drm-capabilities.spec.ts  key systems per platform; @edge Widevine offered + played
 tests/unit/*.spec.ts       unit tests for metrics.ts, flake.ts, experiment.ts and collect.ts
 scripts/flake-report.ts    JSON report to flake table
 scripts/metrics-report.ts  JSON report to results/metrics.json + summary table
@@ -68,6 +68,7 @@ scripts/serve.mjs          static server for Playwright's webServer
 scripts/archive-results.mjs  copy reports into archive/<platform>/ (Jenkins)
 src/report.ts              shared reader for Playwright's JSON report
 .github/workflows/ci.yml
+.github/workflows/experiment.yml  A/B experiment, nightly + on demand
 Jenkinsfile
 playwright.config.ts
 README.md                  narrative overview + high-level diagram
@@ -87,6 +88,7 @@ ARCHITECTURE.md            detailed diagram, CI flow, security boundaries
 **Phase 5: A second platform (Windows + Edge) (done).** Mirror the "Linux tests and Windows tests" split of a real player team.
 - **Playwright projects (done):** `unit`, plus `chromium` on Linux or `edge` (`channel: 'msedge'`, with `--disable-component-update` removed so Widevine registers) on Windows, chosen by `process.platform`. Platform-specific tests carry the tag `@edge`; `chromium` excludes them with `grepInvert`, so there is one test codebase.
 - **Platform-specific test (done):** a DRM capability check that records which key systems each platform offers (ClearKey, Widevine) via `navigator.requestMediaKeySystemAccess`, and asserts only what has been observed: ClearKey everywhere, Widevine on Edge/Windows (`@edge`). PlayReady is out of scope: Edge on GPU-less Windows Server VMs never offers it.
+- **Widevine playback and a stricter negative control (review fixes):** `site/index.html` takes `&license=<URL>` (Widevine licence server); `STREAMS.angelOneWidevine` uses Shaka's public test licence server; an `@edge` test plays it from 20 s and asserts `keySystem() === 'com.widevine.alpha'` (verified 3/3 on the Windows VM after one unexplained first-run Shaka 6012; the page now records `err.data` to diagnose a repeat). The ClearKey wrong-key test now requires a decode/DRM error (video code 3, or Shaka category 3 or 6) and no Shaka network error (category 1).
 - **GitHub Actions (done):** one matrix job, `playback`, runs in parallel on `linux-chromium` (`ubuntu-latest`) and `windows-edge` (`windows-latest`, where Edge is preinstalled); both run the unit tests. A gate job `CI passed` (`needs: playback`, `if: always()`) is the only check the merge ruleset requires. `push` triggers only on `main`; PR branches run via `pull_request`, so each job reports once.
 - **Jenkins (done):** a Windows agent (a Windows VM Tyler provides) labelled `windows`, connected by the controller over SSH so Jenkins stays private. The `Jenkinsfile` has `agent none` and parallel `linux-chromium` / `windows-edge` stages (`failFast false`); the Windows stage runs directly on the agent with `bat` (no Docker), with Java, Node 22, Git and Edge installed there. Each stage copies its reports into `archive/<platform>/` (`scripts/archive-results.mjs`) before archiving, so the platforms don't overwrite each other.
 - **Cross-platform check:** anything run on Windows must not rely on POSIX shell syntax, and paths must use Node's `path` module. Known exception, documented in the README: `npm run test:chaos` uses `CHAOS=1 …`; CI never runs it.
@@ -98,8 +100,9 @@ ARCHITECTURE.md            detailed diagram, CI flow, security boundaries
 - **Pitfall found (verified):** changing only `defaultBandwidthEstimate` has no effect in Chromium, because Shaka prefers the Network Information estimate; both arms started at 576p.
 - **Results (verified, Linux, 3 batches × 10 runs per arm):** treatment TTFF p50 400–411 ms vs control 475–499 ms (−16 to −18%), at 144p vs 576p, no rebuffers or errors. Edge on Windows (3 runs) points the same way. An earlier 6-run probe with a different control pointed the other way: small samples mislead.
 - **Comparison:** `compareArms(control, treatment, rules)` in `src/experiment.ts` is Tyler's; `tests/unit/experiment.spec.ts` specifies it (p50s via `percentile`, delta and deltaPct, Inconclusive below `minRuns` 5 or `minEffectPct` 10%, exactly 10% counts). p50s and deltas are always reported; only the verdict depends on the rules. First full run with the verdict: control 558 ms vs treatment 446 ms, −20.2%, **better**.
-- **CI:** the main suite runs with `--grep-invert @experiment`; the experiment runs in its own `experiment` matrix job (GitHub, also needed by `CI passed`) and `*-experiment` stages (Jenkins), `--repeat-each=10`, so CI gets a real verdict per platform. Only the guardrail can fail it.
-- **Reports:** `scripts/experiment-report.ts` → `results/experiment.md`, added to `npm run report`, the experiment job's summary and the Jenkins experiment stages. `npm run experiment` = `--grep @experiment --repeat-each=10` + the report (cross-platform: no env vars).
+- **CI: experiments measure, they don't gate.** The main suite runs with `--grep-invert @experiment`. GitHub: `.github/workflows/experiment.yml` (Linux + Windows matrix, `--repeat-each=10`), nightly on main (`schedule`) and on demand (`workflow_dispatch`); not part of `CI passed`. Jenkins: an `Experiment` stage after `Platforms` (so it doesn't compete with the suite for CPU), `when { branch 'main' }`.
+- **Reports:** `scripts/experiment-report.ts` → `results/experiment.md`, added to `npm run report`, the experiment workflow's summary and the Jenkins experiment stages. `npm run experiment` = `--grep @experiment --repeat-each=10` + the report (cross-platform: no env vars).
+- **Guardrails and decision:** the report adds a start-height guardrail (treatment start-height p50 must not be lower than control's) and calls `decide(verdict, guardrails)`: Better + all guardrails pass → Better; Better + any fails → `Verdict.TradeOff`; otherwise the verdict unchanged. The current experiment's decision is **trade-off** (TTFF better, start height 576p → 144p).
 - **Docs:** README rewritten as a narrative that reflects what a player quality / test-infrastructure team does (quality metrics, platforms and content protection, experimentation, CI/CD and developer productivity, AI-assisted workflow), with a small diagram; the full diagram moved to `ARCHITECTURE.md`.
 
 ## Infrastructure

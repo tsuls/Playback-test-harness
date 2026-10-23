@@ -62,8 +62,17 @@ test.describe('ClearKey (EME)', () => {
     });
     const errors = (await readEvents(page)).filter((e) => e.type === 'error');
     await test.info().attach('errors.json', { body: JSON.stringify(errors, null, 2), contentType: 'application/json' });
+    // "Some error happened" isn't enough: a CDN timeout or a 404 would pass that
+    // too. The failure must be a decode or DRM failure, and not a network one.
     // We saw MEDIA_ERR_DECODE (3) from the video element and Shaka 3014/3015, but
-    // the exact codes are Chromium's business; assert only that decoding failed.
-    expect(errors.length).toBeGreaterThan(0);
+    // the exact codes are Chromium's business, so match on the kind of error:
+    // - video element: error.code 3 is MEDIA_ERR_DECODE
+    // - Shaka: category 3 is MEDIA, 6 is DRM, 1 is NETWORK
+    const decodeOrDrm = errors.filter((e) =>
+      (e.source === 'video' && e.detail?.code === 3) ||
+      (e.source === 'shaka' && (e.detail?.category === 3 || e.detail?.category === 6)));
+    const network = errors.filter((e) => e.source === 'shaka' && e.detail?.category === 1);
+    expect(decodeOrDrm.length, 'a decode or DRM error, not just any error').toBeGreaterThan(0);
+    expect(network, 'no network errors: those would mean the stream never loaded').toEqual([]);
   });
 });

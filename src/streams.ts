@@ -9,6 +9,8 @@ export interface Stream {
   manifest: string;
   /** ClearKey key as "<keyId hex>:<key hex>", for encrypted streams. */
   clearKey?: string;
+  /** Widevine licence server URL, for Widevine-protected streams. */
+  widevineLicense?: string;
 }
 
 const SHAKA_ASSETS = 'https://storage.googleapis.com/shaka-demo-assets';
@@ -30,6 +32,16 @@ export const STREAMS = {
     name: 'Angel One (ClearKey DASH)',
     manifest: `${SHAKA_ASSETS}/angel-one-clearkey/dash.mpd`,
     clearKey: 'feedf00deedeadbeeff0baadf00dd00d:00112233445566778899aabbccddeeff',
+  },
+  /**
+   * Angel One, Widevine-protected DASH, with Shaka's public test licence server
+   * (CORS allows http://localhost). Only browsers with a Widevine module can
+   * play it: Edge on Windows here, not Playwright's open-source Chromium.
+   */
+  angelOneWidevine: {
+    name: 'Angel One (Widevine DASH)',
+    manifest: `${SHAKA_ASSETS}/angel-one-widevine/dash.mpd`,
+    widevineLicense: 'https://cwip-shaka-proxy.appspot.com/no_auth',
   },
 } satisfies Record<string, Stream>;
 

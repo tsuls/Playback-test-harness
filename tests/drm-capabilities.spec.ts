@@ -1,4 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
+import { STREAMS } from '../src/streams';
+import { pageUrl, recordRun, waitForFirstFrame, waitForPlayhead } from '../src/collect';
 
 // Which DRM key systems does this platform offer? Every EME browser must offer
 // ClearKey; Widevine depends on the browser build.
@@ -54,4 +56,19 @@ test('records which DRM key systems this platform offers', async ({ page }, test
 test('Edge on Windows offers Widevine', { tag: '@edge' }, async ({ page }) => {
   const offered = await offeredKeySystems(page);
   expect(offered.widevine, 'needs --disable-component-update removed; see playwright.config.ts').toBe(true);
+});
+
+// Being offered Widevine is not the same as playing it: this test decrypts real
+// Widevine content, with a licence from Shaka's public test server, on Edge.
+// It starts at 20 s, like the ClearKey tests, so it plays encrypted segments
+// rather than any unencrypted lead-in.
+test('Edge on Windows plays Widevine content', { tag: '@edge' }, async ({ page }) => {
+  const start = 20;
+  await page.goto(pageUrl(STREAMS.angelOneWidevine, { start }));
+  await waitForFirstFrame(page);
+  await waitForPlayhead(page, start + 5);
+
+  expect(await page.evaluate(() => window.__player.keySystem())).toBe('com.widevine.alpha');
+  const { metrics } = await recordRun(page);
+  expect(metrics.errors).toEqual([]);
 });

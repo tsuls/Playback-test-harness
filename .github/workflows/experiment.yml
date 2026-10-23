@@ -1,0 +1,67 @@
+# The A/B experiment, on both platforms, with 10 runs per arm so compareArms has
+# enough samples for a verdict. It measures; it doesn't gate: it is not part of
+# the `CI passed` check, so it never slows down or blocks a pull request.
+#
+# Triggers:
+# - `schedule`: nightly, on main (scheduled workflows always run on the default
+#   branch). The cron time is UTC.
+# - `workflow_dispatch`: a "Run workflow" button in the Actions tab, to run it on
+#   demand, e.g. on a branch that changes a player setting.
+
+name: Experiment
+
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  experiment:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-chromium
+            os: ubuntu-latest
+          - platform: windows-edge
+            os: windows-latest
+    name: experiment (${{ matrix.platform }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install Chromium
+        if: ${{ runner.os == 'Linux' }}
+        run: npx playwright install --with-deps chromium
+
+      # The job fails only if the guardrail assertion in the test fails (a
+      # playback error in either arm). The verdict and decision are reported.
+      - name: Run experiment
+        run: npx playwright test --grep @experiment --repeat-each=10
+
+      - name: Experiment report → job summary
+        if: ${{ !cancelled() }}
+        run: npx tsx scripts/experiment-report.ts >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: experiment-${{ matrix.platform }}
+          path: results/
+          retention-days: 14
