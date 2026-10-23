@@ -124,7 +124,7 @@ Two things the experiment taught:
 3. Playwright's JSON reporter writes every attempt to `results/report.json`.
 4. `scripts/flake-report.ts` reads that file and prints, per test: runs, passes, failures, flaky runs and the flake rate (flaky / runs).
 
-`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time, so the report has something to catch. It only runs with `CHAOS=1` (`npm run test:chaos`); everywhere else, CI included, it is skipped, which accounts for 3 skips per CI run (one per repeat). Running it in CI would make builds random: about 3% of the time (0.3 × 0.3) it would fail both attempts and turn a pull request red for no reason.
+`tests/chaos.spec.ts` is a clearly labelled demonstration test that fails about 30% of the time, so the report has something to catch. It only runs with `CHAOS=1` (`npm run test:chaos`); everywhere else, CI included, it is skipped, which accounts for 3 skips per CI run (one per repeat). Running it in CI would make builds random: about 9% of the time (0.3 × 0.3) it would fail both attempts and turn a pull request red for no reason.
 
 ### Should a flaky test fail CI?
 
@@ -204,7 +204,7 @@ JUnit XML has no "flaky" status: a test that passes on retry shows up in Jenkins
 
 Most of the pipeline work was debugging, and the lessons generalise:
 
-- **A required check must report on every pull request,** or it blocks merging forever. A gate that is *skipped* counts as passing, so the gate runs with `if: always()`. And Jenkins builds a branch *or* its pull request, not both, so the required Jenkins check is `pr-head`, not `branch`.
+- **A required check must report on every pull request,** or it blocks merging forever. A gate that is *skipped* counts as passing, so the gate runs with `if: always()`. And once a branch has an open pull request, Jenkins builds only the pull request, so the required Jenkins check is `pr-head`, not `branch`. (A branch pushed *before* its PR is opened gets one `branch` build too, which shows up as an extra, non-required check.)
 - **Duplicate triggers double the noise.** Triggering on both `push` and `pull_request` reported every job twice per PR, until `push` was limited to `main`.
 - **Windows breaks quietly.** An unquoted `C:\Program Files\…` path stopped the Jenkins agent from launching, and `.cmd` scripts swallow the rest of a `bat` line without `call`.
 
@@ -245,8 +245,8 @@ scripts/experiment-report.ts JSON report → experiment comparison
 scripts/serve.mjs            static server started by Playwright's webServer
 scripts/archive-results.mjs  copy reports into archive/<platform>/ for Jenkins
 playwright.config.ts         projects: unit, plus chromium (Linux) or edge (Windows)
-.github/workflows/ci.yml     CI matrix (Linux + Windows) and the "CI passed" gate
-Jenkinsfile                  the same pipeline for Jenkins: parallel Linux and Windows stages
+.github/workflows/ci.yml     playback + experiment matrix jobs (Linux + Windows) and the "CI passed" gate
+Jenkinsfile                  the same pipeline for Jenkins: parallel Linux and Windows stages, plus experiment stages
 ARCHITECTURE.md              detailed architecture diagram and security boundaries
 ```
 
