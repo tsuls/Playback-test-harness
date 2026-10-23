@@ -151,6 +151,17 @@ From a local Linux + Chromium run with `--repeat-each=3` (test names shortened):
 | Clear stream | 3 | 455 | 477 | 0 | 0 | 0 | 0 | none |
 | ClearKey, right key | 3 | 633 | 813 | 0 | 0 | 0 | 0 | none |
 
+The same suite on Windows + Edge (a Windows Server VM, `--repeat-each=3`, 153 passed):
+
+| Test | Runs | TTFF p50 (ms) | TTFF p95 (ms) | Rebuffers | Rebuffer ms | Shaka rebuffers | Shaka rebuffer ms | Errors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Throttled stall | 3 | 346 | 374 | 3 | 9713 | 3 | 9713 | none |
+| Clear stream | 3 | 291 | 327 | 0 | 0 | 0 | 0 | none |
+| ClearKey, right key | 3 | 443 | 455 | 0 | 0 | 0 | 0 | none |
+| Widevine (Edge only) | 3 | 2875 | 2910 | 0 | 0 | 0 | 0 | none |
+
+Widevine's TTFF is about six times ClearKey's, and the gap is the point of the comparison: ClearKey hands the key to the browser directly, while Widevine sends a licence request to a remote server and initialises the browser's DRM module before the first frame. Startup cost like this is why real players request licences early.
+
 And the chaos demo, 10 runs:
 
 | Test | Runs | Passes | Failures | Flaky | Flake rate |

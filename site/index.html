@@ -84,7 +84,29 @@
       if (license) {
         // A real DRM system: the browser's Widevine module asks this server for
         // the key, and the key never reaches the page.
-        player.configure({ drm: { servers: { 'com.widevine.alpha': license } } });
+        //
+        // Edge registers its Widevine module asynchronously at startup. If Shaka
+        // loads before that, the manifest's generic `cenc` entry lets it fall
+        // back to another key system that has no licence server (Shaka error
+        // 6012); we saw that once on a first run. So wait until Widevine is
+        // actually offered, and tell Shaka to prefer it.
+        const widevineConfig = [{
+          initDataTypes: ['cenc'],
+          videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.4d401f"' }],
+        }];
+        const deadline = performance.now() + 10_000;
+        for (;;) {
+          try {
+            await navigator.requestMediaKeySystemAccess('com.widevine.alpha', widevineConfig);
+            break;
+          } catch {
+            if (performance.now() > deadline) throw new Error('Widevine was not offered within 10 s');
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+        }
+        player.configure({
+          drm: { servers: { 'com.widevine.alpha': license }, preferredKeySystems: ['com.widevine.alpha'] },
+        });
       }
 
       // TTFF is measured from this mark, i.e. from the moment we ask Shaka to load.
