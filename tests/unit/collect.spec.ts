@@ -74,3 +74,14 @@ test('shakaCrossCheck ignores startup buffering for rebuffers but not for buffer
   expect(check.rebufferMs).toBeCloseTo(150);
   expect(check.bufferingMs).toBeCloseTo(400);
 });
+
+test('shakaCrossCheck reports DRM timings only when DRM is in use', () => {
+  const base = { timeToFirstFrame: 1, loadLatency: 1, bufferingTime: 0, stallsDetected: 0, stateHistory: [], currentCodecs: '', width: 0, height: 0 };
+  const drm = shakaCrossCheck({ ...base, licenseTime: 1.2, drmTimeSeconds: 1.5 } as ShakaStats);
+  expect(drm.licenseMs).toBeCloseTo(1200);
+  expect(drm.drmMs).toBeCloseTo(1500);
+  // Shaka reports NaN for "no DRM": that must not turn into a misleading 0.
+  const clear = shakaCrossCheck({ ...base, licenseTime: NaN, drmTimeSeconds: NaN } as ShakaStats);
+  expect(clear.licenseMs).toBeUndefined();
+  expect(clear.drmMs).toBeUndefined();
+});

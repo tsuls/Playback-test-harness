@@ -151,16 +151,16 @@ From a local Linux + Chromium run with `--repeat-each=3` (test names shortened):
 | Clear stream | 3 | 455 | 477 | 0 | 0 | 0 | 0 | none |
 | ClearKey, right key | 3 | 633 | 813 | 0 | 0 | 0 | 0 | none |
 
-The same suite on Windows + Edge (a Windows Server VM, `--repeat-each=3`, 153 passed):
+The same suite on Windows + Edge (a Windows Server VM, `--repeat-each=3`, 156 passed). The last two columns are Shaka's own DRM timers, `licenseTime` and `drmTimeSeconds`, recorded only for protected streams:
 
-| Test | Runs | TTFF p50 (ms) | TTFF p95 (ms) | Rebuffers | Rebuffer ms | Shaka rebuffers | Shaka rebuffer ms | Errors |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Throttled stall | 3 | 346 | 374 | 3 | 9713 | 3 | 9713 | none |
-| Clear stream | 3 | 291 | 327 | 0 | 0 | 0 | 0 | none |
-| ClearKey, right key | 3 | 443 | 455 | 0 | 0 | 0 | 0 | none |
-| Widevine (Edge only) | 3 | 2875 | 2910 | 0 | 0 | 0 | 0 | none |
+| Test | Runs | TTFF p50 (ms) | TTFF p95 (ms) | Rebuffers | Rebuffer ms | Shaka rebuffers | Shaka rebuffer ms | License p50 (ms) | DRM key p50 (ms) | Errors |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| Throttled stall | 3 | 339 | 365 | 3 | 9744 | 3 | 9744 | – | – | none |
+| Clear stream | 3 | 312 | 321 | 0 | 0 | 0 | 0 | – | – | none |
+| ClearKey, right key | 3 | 472 | 736 | 0 | 0 | 0 | 0 | 1 | 90 | none |
+| Widevine (Edge only) | 3 | 2811 | 2889 | 0 | 0 | 0 | 0 | 206 | 2293 | none |
 
-Widevine's TTFF is about six times ClearKey's, and the gap is the point of the comparison: ClearKey hands the key to the browser directly, while Widevine sends a licence request to a remote server and initialises the browser's DRM module before the first frame. Startup cost like this is why real players request licences early.
+**Where Widevine's startup goes.** Its TTFF is about six times ClearKey's. The obvious guess is the licence round trip to a remote server, but the timers say otherwise: licence requests take about 0.2 s, while getting the first key fetched *and loaded into the DRM module* takes about 2.3 s. So roughly 2 s is spent inside the browser's Widevine module (starting it and setting up the key session), not on the network. On a real device that cost depends on the hardware, which is one more reason DRM startup has to be measured per platform rather than assumed.
 
 And the chaos demo, 10 runs:
 
@@ -221,6 +221,7 @@ Most of the pipeline work was debugging, and the lessons generalise:
 
 - **A required check must report on every pull request,** or it blocks merging forever. A gate that is *skipped* counts as passing, so the gate runs with `if: always()`. And once a branch has an open pull request, Jenkins builds only the pull request, so the required Jenkins check is `pr-head`, not `branch`. (A branch pushed *before* its PR is opened gets one `branch` build too, which shows up as an extra, non-required check.)
 - **Duplicate triggers double the noise.** Triggering on both `push` and `pull_request` reported every job twice per PR, until `push` was limited to `main`.
+- **Fix a flaky test at its cause, not with a retry.** The Widevine test once failed on a first run with Shaka error 6012 ("no licence server"). Edge registers its Widevine module asynchronously at startup, and Shaka, finding it not ready yet, fell back to another key system that had no licence server. The page now waits until Widevine is actually offered and tells Shaka to prefer it. A retry would have hidden a real startup race that a user's first playback could hit too.
 - **Windows breaks quietly.** An unquoted `C:\Program Files\…` path stopped the Jenkins agent from launching, and `.cmd` scripts swallow the rest of a `bat` line without `call`.
 
 ## Known constraints
