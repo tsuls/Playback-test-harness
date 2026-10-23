@@ -7,7 +7,7 @@
 // prints it.
 
 import { writeFileSync } from 'node:fs';
-import { compareArms, DEFAULT_RULES } from '../src/experiment';
+import { compareArms, decide, DEFAULT_RULES, type Guardrail } from '../src/experiment';
 import { percentile, summarize } from '../src/metrics';
 import { annotation, DEFAULT_REPORT_PATH, loadRuns, markdownTable, type RunRecord } from '../src/report';
 
@@ -25,6 +25,22 @@ for (const run of runs) {
 
 const ms = (n: number) => n.toFixed(0);
 const ttffs = (group: RunRecord[]) => group.map((r) => r.metrics!.ttffMs);
+const startHeights = (group: RunRecord[]) =>
+  group.flatMap((r) => (r.metrics!.startHeight === undefined ? [] : [r.metrics!.startHeight]));
+
+/**
+ * Guardrail: the treatment must not start at a lower quality than the control.
+ * A faster start bought by starting blurry is a trade-off, not a win.
+ * Undefined when either arm has no start heights recorded.
+ */
+function startHeightGuardrail(control: RunRecord[], treatment: RunRecord[]): Guardrail | undefined {
+  const c = startHeights(control);
+  const t = startHeights(treatment);
+  if (c.length === 0 || t.length === 0) return undefined;
+  const cP50 = percentile(c, 50);
+  const tP50 = percentile(t, 50);
+  return { name: 'start height p50', passed: tP50 >= cP50, detail: `${cP50}p → ${tP50}p` };
+}
 
 const sections = [...experiments.entries()].map(([name, arms]) => {
   const table = markdownTable(
@@ -32,7 +48,7 @@ const sections = [...experiments.entries()].map(([name, arms]) => {
     [...arms.entries()].map(([arm, group]) => {
       const m = group.map((r) => r.metrics!);
       const ttff = summarize(ttffs(group));
-      const heights = m.flatMap((x) => (x.startHeight === undefined ? [] : [x.startHeight]));
+      const heights = startHeights(group);
       return [
         arm,
         group.length,
@@ -58,6 +74,18 @@ const sections = [...experiments.entries()].map(([name, arms]) => {
         `**Treatment vs control, TTFF p50:** ${sign}${ms(c.delta)} ms (${sign}${c.deltaPct.toFixed(1)}%), ` +
         `verdict **${c.verdict}** (rules: at least ${DEFAULT_RULES.minRuns} runs per arm ` +
         `and a change of at least ${DEFAULT_RULES.minEffectPct}%).`;
+
+      // Guardrails: what the treatment must not make worse, whatever TTFF does.
+      const guardrails = [startHeightGuardrail(control, treatment)].filter((g) => g !== undefined);
+      const lines = guardrails.map((g) => `- ${g.passed ? '✅' : '❌'} ${g.name}: ${g.detail}`);
+      verdict += `\n\n**Guardrails:**\n${lines.join('\n') || '- none could be evaluated'}`;
+      try {
+        verdict += `\n\n**Decision:** **${decide(c.verdict, guardrails)}**`;
+      } catch (err) {
+        verdict += err instanceof Error && err.message === 'TODO'
+          ? '\n\n**Decision:** `decide()` in src/experiment.ts is not implemented yet.'
+          : `\n\n**Decision:** failed: ${String(err)}`;
+      }
     } catch (err) {
       verdict = err instanceof Error && err.message === 'TODO'
         ? 'Verdict: `compareArms()` in src/experiment.ts is not implemented yet.'

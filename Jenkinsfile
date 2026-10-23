@@ -99,10 +99,18 @@ pipeline {
             }
           }
         }
+      }
+    }
 
-        // The A/B experiment, 10 runs per arm, so compareArms has enough samples
-        // to call a verdict. Same as the `experiment` job in ci.yml. A stage
-        // fails only if the guardrail fails (a playback error in either arm).
+    // The A/B experiment, after the main suite, so it measures TTFF on an idle
+    // machine instead of competing with the suite for CPU. Only on main: like
+    // the nightly GitHub workflow, it measures and doesn't gate pull requests.
+    stage('Experiment') {
+      when { branch 'main' }
+      failFast false
+      parallel {
+        // 10 runs per arm, so compareArms has enough samples for a verdict. A
+        // stage fails only if the test's guardrail fails (a playback error).
         stage('linux-chromium-experiment') {
           agent {
             docker {
@@ -130,8 +138,6 @@ pipeline {
           }
         }
 
-        // The Windows agent has one executor, so this stage waits for
-        // windows-edge to finish and then runs on the same machine.
         stage('windows-edge-experiment') {
           agent { label 'windows' }
           stages {

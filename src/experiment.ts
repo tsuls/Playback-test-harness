@@ -10,6 +10,8 @@ export enum Verdict {
   Worse = 'worse',
   /** Too few runs, or a change too small to tell apart from noise. */
   Inconclusive = 'inconclusive',
+  /** The metric improved, but at the cost of a guardrail (see decide()). */
+  TradeOff = 'trade-off',
 }
 
 /** When a difference is big enough, and backed by enough runs, to call. */
@@ -75,4 +77,31 @@ export function compareArms(
   }
 
   return { controlP50, treatmentP50, delta, deltaPct, verdict };
+}
+
+/**
+ * A check the treatment must not make worse, whatever happens to the main
+ * metric. For example: playback must not start at a lower quality.
+ */
+export interface Guardrail {
+  name: string;
+  passed: boolean;
+  /** Human-readable evidence, e.g. "576p → 144p". */
+  detail: string;
+}
+
+/**
+ * The experiment's overall decision, from compareArms()'s verdict on the main
+ * metric plus the guardrails.
+ *
+ * - Better, and every guardrail passed: Better.
+ * - Better, but at least one guardrail failed: TradeOff (it won by giving
+ *   something else up).
+ * - Anything else: the verdict unchanged (Worse stays Worse, Inconclusive stays
+ *   Inconclusive), whatever the guardrails say.
+ * - No guardrails counts as "every guardrail passed".
+ * - The guardrails array is not modified.
+ */
+export function decide(verdict: Verdict, guardrails: readonly Guardrail[]): Verdict {
+  throw new Error('TODO');
 }

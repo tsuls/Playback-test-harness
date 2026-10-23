@@ -69,10 +69,11 @@ A metric is only useful if it can be trusted, so every run also records Shaka's 
 | Codec support | The browser reports H.264/AAC support through `MediaSource.isTypeSupported`. |
 | Clear stream | A clear DASH stream starts, plays 5 s, has a sane TTFF and no errors. |
 | ClearKey, right key | An encrypted stream decrypts through EME (`org.w3.clearkey`) and plays. |
-| ClearKey, wrong key | A negative control: with a wrong key, decoding fails. Proves the test above really depends on decryption. |
+| ClearKey, wrong key | A negative control: with a wrong key, playback fails with a *decode or DRM* error, and no network error. Proves the test above really depends on decryption; a CDN outage or a 404 can't pass it. |
 | Throttled stall | ABR is turned off to pin the top bitrate, bandwidth is cut through the Chrome DevTools Protocol until the buffer runs dry, then restored. Asserts a rebuffer was detected and the playhead moves again. |
 | DRM capabilities | Records which key systems the platform offers (`requestMediaKeySystemAccess`) as an annotation and a JSON attachment. Asserts ClearKey everywhere. |
 | Edge offers Widevine (`@edge`) | Windows only: Edge offers Widevine. |
+| Edge plays Widevine (`@edge`) | Windows only: plays a Widevine-protected stream past its first 20 s, with a licence from Shaka's public test server, and checks the key system Shaka used. |
 | Experiment arms (`@experiment`) | Plays the same stream under each arm's player configuration and records its metrics; see *A/B experiments*. |
 
 ## Platforms and content protection
@@ -85,10 +86,10 @@ Each platform tests its own browser, and every test runs on both unless it is ta
 | Browser setup | `npx playwright install --with-deps chromium` | None: Edge comes with Windows |
 | Platform-only tests | none | tagged `@edge`; `chromium` skips them with `grepInvert` |
 | ClearKey | ✅ | ✅ |
-| Widevine | ❌ (the open-source build has no CDM) | ✅ |
+| Widevine | ❌ (the open-source build has no CDM) | ✅ offered and played |
 | PlayReady | ❌ | ❌ on the VMs we can test (see below) |
 
-**Widevine on Edge needed one flag removed.** Playwright launches browsers with `--disable-component-update`, which stops Edge from registering its bundled Widevine module. The `edge` project drops that flag (`launchOptions.ignoreDefaultArgs`), and Widevine then works as in a normal install.
+**Widevine on Edge needed one flag removed.** Playwright launches browsers with `--disable-component-update`, which stops Edge from registering its bundled Widevine module. The `edge` project drops that flag (`launchOptions.ignoreDefaultArgs`), and Widevine then works as in a normal install: Edge offers it, and plays Widevine content with a licence from Shaka's public test server (`&license=` on the test page).
 
 **PlayReady isn't tested, and the reason is worth knowing.** Edge on a GPU-less Windows Server VM (a cloud VM, and GitHub's Windows runners) never offers PlayReady at any security level, SL2000 included, even though Windows' PlayReady component is installed. Edge reports software-only rendering there (SwiftShader, Microsoft Basic Render Driver), and PlayReady most likely needs a hardware graphics path. That is a strong hypothesis rather than a proven cause: confirming it needs the same test on real Windows hardware with a GPU. It is also a general lesson about device testing: a cloud machine is not the device your users have.
 
@@ -97,6 +98,8 @@ Each platform tests its own browser, and every test runs on both unless it is ta
 ## A/B experiments
 
 Tests say whether the player works. Experiments say whether a change makes it *better*. `tests/experiment.spec.ts` plays the same stream under two player configurations, tags each run with its experiment and arm, and `scripts/experiment-report.ts` compares the arms. The comparison (`compareArms` in `src/experiment.ts`) uses the p50 of a lower-is-better metric and only calls a winner when each arm has enough runs and the change is large enough to stand out from network noise. Otherwise the verdict is *inconclusive*.
+
+A faster number isn't a win on its own. The report also checks **guardrails**, things the treatment must not make worse, starting with start quality: the treatment's start-height p50 must not be lower than the control's. `decide()` combines the two: *better* on the metric with every guardrail passing is **better**; *better* but with a guardrail failing is a **trade-off**; anything else keeps the metric's verdict.
 
 **The experiment: what should the player assume about bandwidth before it has measured any?** That first guess picks the starting quality.
 
@@ -110,12 +113,12 @@ Results from three batches of 10 runs per arm (Linux + Chromium):
 | control | 475–499 | 576p | 0 | none |
 | treatment | 400–411 | 144p | 0 | none |
 
-The conservative start reaches the first frame about 16–18% sooner in every batch, but starts at a quarter of the height (144p vs 576p, a sixteenth of the pixels). That is the real decision behind the setting: a faster start versus a sharper first few seconds. Neither arm rebuffered, so the guardrail held. Edge on Windows points the same way.
+The conservative start reaches the first frame about 16–18% sooner in every batch, but starts at a quarter of the height (144p vs 576p, a sixteenth of the pixels). That is the real decision behind the setting: a faster start versus a sharper first few seconds. So the report's decision is **trade-off** (TTFF better, start-height guardrail failed: 576p → 144p), not *better*. Neither arm rebuffered or errored. Edge on Windows points the same way.
 
 Two things the experiment taught:
 
 - **A setting can be silently ignored.** The first attempt changed only `defaultBandwidthEstimate`, and both arms started at 576p. Shaka uses the browser's Network Information estimate whenever it is available, so the setting had no effect until `useNetworkInformation` was turned off as well. Without checking the start height, the experiment would have reported "no difference" for a change that never happened.
-- **Small samples mislead.** An early probe of 6 runs per arm, with a slightly different control, pointed the *other* way. That is why the verdict needs a minimum number of runs. Both CI systems run the experiment in its own job with 10 runs per arm, as `npm run experiment` does locally, so every pull request gets a real verdict for each platform. A production experiment would also randomise the order of runs, use far more samples on real user traffic, and test for significance rather than use a fixed threshold.
+- **Small samples mislead.** An early probe of 6 runs per arm, with a slightly different control, pointed the *other* way. That is why the verdict needs a minimum number of runs: 10 per arm, in CI and in `npm run experiment`. A production experiment would also randomise the order of runs, use far more samples on real user traffic, and test for significance rather than use a fixed threshold.
 
 ## Flaky tests
 
@@ -154,7 +157,7 @@ And the chaos demo, 10 runs:
 | --- | --- | --- | --- | --- | --- |
 | DEMO: fails randomly about 30% of the time | 10 | 6 | 1 | 3 | 30% |
 
-CI writes the flake and metrics tables to each platform's summary page, and the experiment table to the experiment job's, so a developer sees them on the pull request without digging through logs, and uploads the HTML report and `results/` as artifacts (`playwright-report-<platform>`, `results-<platform>`).
+CI writes the flake and metrics tables to each platform's summary page, so a developer sees them on the pull request without digging through logs, and uploads the HTML report and `results/` as artifacts (`playwright-report-<platform>`, `results-<platform>`).
 
 ## CI/CD
 
@@ -162,13 +165,14 @@ Every pull request runs the full suite on both platforms in two CI systems, and 
 
 ### GitHub Actions
 
-[`ci.yml`](.github/workflows/ci.yml) has three jobs:
+[`ci.yml`](.github/workflows/ci.yml) has two jobs:
 
 - **`playback`**, a *matrix* job: one definition, run in parallel on `linux-chromium` (`ubuntu-latest`) and `windows-edge` (`windows-latest`). `fail-fast: false` lets every platform finish and report even if another fails. It runs everything except the experiment arms.
-- **`experiment`**, the same matrix running only the A/B experiment, 10 runs per arm. In its own job the arms get enough samples for a verdict and don't compete for the machine with the rest of the suite. It fails only if the guardrail fails (a playback error); a *worse* verdict is reported, not enforced.
-- **`CI passed`**, a gate job that `needs` both and succeeds only if every job on every platform did. It is the one check the merge ruleset requires, so adding a platform never means editing the ruleset. It runs with `if: always()`: otherwise a platform failure would *skip* the gate, and GitHub treats a skipped required check as passing.
+- **`CI passed`**, a gate job that `needs` the matrix and succeeds only if every platform did. It is the one check the merge ruleset requires, so adding a platform never means editing the ruleset. It runs with `if: always()`: otherwise a platform failure would *skip* the gate, and GitHub treats a skipped required check as passing.
 
 It runs on pull requests, and on pushes to `main` only. Running on every push as well would report each job twice per PR.
+
+The A/B experiment has its own workflow, [`experiment.yml`](.github/workflows/experiment.yml): the same Linux + Windows matrix, 10 runs per arm, nightly on `main` and from a *Run workflow* button. **Experiments measure, they don't gate:** it isn't part of `CI passed`, so 20 network-dependent playbacks per platform never slow down or block a pull request. Its report goes to the run's summary page.
 
 ### Jenkins
 
@@ -178,13 +182,13 @@ The pipeline has `agent none` and a `Platforms` stage that runs its stages in `p
 
 - **`linux-chromium`** runs inside Microsoft's Playwright Docker image, which already includes Chromium and its Linux libraries. It needs the Docker Pipeline plugin and Docker on the agent.
 - **`windows-edge`** runs on any agent labelled `windows`, directly on the machine with `bat` steps (no Docker). The agent needs Java, Node 22, Git and Edge. The Jenkins controller connects to it over SSH (SSH Build Agents plugin), so the Windows machine never has to reach Jenkins and the Jenkins UI stays private.
-- **`linux-chromium-experiment`** and **`windows-edge-experiment`** run the A/B experiment with 10 runs per arm, like the `experiment` job in GitHub Actions. The Windows agent has one executor, so its experiment stage waits for `windows-edge` and then runs on the same machine.
+An `Experiment` stage runs **after** `Platforms`, with `linux-chromium-experiment` and `windows-edge-experiment` in parallel, 10 runs per arm. Running after the suite means the experiment measures TTFF on an idle machine rather than competing with the suite for CPU. It runs only on `main` (`when { branch 'main' }`), so, as in GitHub Actions, it doesn't gate pull requests.
 
 | | GitHub Actions (`ci.yml`) | Jenkins (`Jenkinsfile`) |
 | --- | --- | --- |
 | Where it runs | GitHub's Ubuntu and Windows machines | Your agents: Docker on Linux, a self-hosted Windows VM |
 | Two platforms | A matrix job | Parallel stages, each with its own `agent` |
-| Experiment | Its own matrix job | Its own stage per platform |
+| Experiment | Separate workflow, nightly and on demand | A stage after the suite, on `main` only |
 | One overall result | Gate job `CI passed` | The pipeline's own status |
 | Browser setup | Linux: `npx playwright install --with-deps chromium`; Windows: none | Linux: already in the image; Windows: none |
 | Steps | `steps:` with `run:` (bash on both) | `sh` on Linux, `bat` on Windows |
@@ -210,7 +214,7 @@ Most of the pipeline work was debugging, and the lessons generalise:
 
 ## Known constraints
 
-- **DRM:** Playwright's Chromium has no Widevine, and no CI machine here offers PlayReady (see *Platforms and content protection*), so the playback tests use clear streams plus one ClearKey stream. ClearKey exercises the same EME path without a licence server.
+- **DRM:** Playwright's Chromium has no Widevine, and no CI machine here offers PlayReady (see *Platforms and content protection*), so the cross-platform playback tests use clear streams plus one ClearKey stream, which exercises the same EME path without a licence server. Real Widevine playback is tested on Edge only, against Shaka's public test licence server.
 - **Clear lead:** the ClearKey demo stream's first few seconds are unencrypted, so *any* key appears to work at the start. The ClearKey tests start playback at 20 s to get past it.
 - **Codecs:** Playwright's bundled Chromium supports H.264/AAC and VP9, so the `chrome` channel isn't needed. On both platforms Shaka chooses VP9 video with AAC audio for these streams, and each run records the codecs actually used (a `codecs` annotation).
 - **Network variance:** streams come from a public CDN, so timings vary between runs and machines. Assertions check behaviour ("a rebuffer happened and playback recovered"), not exact numbers, and use generous timeouts. With only 3 runs, p95 is effectively the slowest run.
@@ -245,8 +249,9 @@ scripts/experiment-report.ts JSON report → experiment comparison
 scripts/serve.mjs            static server started by Playwright's webServer
 scripts/archive-results.mjs  copy reports into archive/<platform>/ for Jenkins
 playwright.config.ts         projects: unit, plus chromium (Linux) or edge (Windows)
-.github/workflows/ci.yml     playback + experiment matrix jobs (Linux + Windows) and the "CI passed" gate
-Jenkinsfile                  the same pipeline for Jenkins: parallel Linux and Windows stages, plus experiment stages
+.github/workflows/ci.yml     playback matrix job (Linux + Windows) and the "CI passed" gate
+.github/workflows/experiment.yml  the A/B experiment, nightly and on demand
+Jenkinsfile                  the same pipeline for Jenkins: parallel Linux and Windows stages, then the experiment on main
 ARCHITECTURE.md              detailed architecture diagram and security boundaries
 ```
 

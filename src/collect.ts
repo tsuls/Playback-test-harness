@@ -51,6 +51,7 @@ export function pageUrl(stream: Stream, opts: PageOptions = {}): string {
   if (opts.abr === false) params.set('abr', 'off');
   const clearKey = opts.clearKey ?? stream.clearKey;
   if (clearKey) params.set('clearkey', clearKey);
+  if (stream.widevineLicense) params.set('license', stream.widevineLicense);
   if (opts.start !== undefined) params.set('start', String(opts.start));
   if (opts.config) params.set('config', JSON.stringify(opts.config));
   return `/?${params}`;

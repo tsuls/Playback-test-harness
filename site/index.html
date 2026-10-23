@@ -12,11 +12,12 @@
   <video id="video" muted autoplay playsinline></video>
 
   <script>
-    // Usage: /?src=<manifest URL>[&abr=off][&clearkey=<keyId hex>:<key hex>][&start=<seconds>][&config=<JSON>]
+    // Usage: /?src=<manifest URL>[&abr=off][&clearkey=<keyId hex>:<key hex>][&license=<URL>][&start=<seconds>][&config=<JSON>]
     //   abr=off   disables adaptive bitrate and pins the highest-bandwidth variant.
     //   config    extra Shaka settings as JSON, passed to player.configure(), e.g.
     //             {"abr":{"defaultBandwidthEstimate":100000}}. Used by experiments.
     //   clearkey  decrypts a ClearKey-protected stream with this key, through EME.
+    //   license   Widevine licence server URL, for a Widevine-protected stream.
     //   start     starts playback at this position (passed to player.load, so no seek).
     //
     // Every event is pushed into window.__events as
@@ -31,6 +32,7 @@
     const src = params.get('src');
     const abrOff = params.get('abr') === 'off';
     const clearKey = params.get('clearkey');
+    const license = params.get('license');
     const start = params.has('start') ? Number(params.get('start')) : undefined;
     const config = params.has('config') ? JSON.parse(params.get('config')) : undefined;
     const video = document.getElementById('video');
@@ -79,6 +81,11 @@
         const [keyId, key] = clearKey.split(':');
         player.configure({ drm: { clearKeys: { [keyId]: key } } });
       }
+      if (license) {
+        // A real DRM system: the browser's Widevine module asks this server for
+        // the key, and the key never reaches the page.
+        player.configure({ drm: { servers: { 'com.widevine.alpha': license } } });
+      }
 
       // TTFF is measured from this mark, i.e. from the moment we ask Shaka to load.
       record('load-start', 'page');
@@ -91,8 +98,9 @@
     }
 
     main().catch((err) => {
-      // Shaka rejects with a shaka.util.Error that has a numeric `code`.
-      record('error', 'page', { code: err.code, message: String(err.message ?? err) });
+      // Shaka rejects with a shaka.util.Error that has a numeric `code`. `data`
+      // holds the specifics, e.g. which key system a DRM error is about.
+      record('error', 'page', { code: err.code, data: err.data, message: String(err.message ?? err) });
     });
   </script>
 </body>
